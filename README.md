@@ -38,6 +38,14 @@ node scripts/smoke-main-path.mjs
 
 期望输出包含 `PAYMENT_OK`、`REPORT_NODE_OK`、`SMOKE_PASS`。
 
+## UI E2E
+
+```bash
+pnpm test:e2e
+```
+
+覆盖：首页 → 填表 → mock 登录恢复 → 六步 → 付费 → 报告导出。
+
 ## 关键路径
 
 | 能力 | 路径 |
