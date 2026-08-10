@@ -12,6 +12,7 @@
     "docker:up": "docker compose -f infrastructure/docker/docker-compose.yml up -d"
   },
   "devDependencies": {
+    "dotenv": "^17.4.2",
     "turbo": "^2.5.0",
     "typescript": "^5.8.0"
   }
