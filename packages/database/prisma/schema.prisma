@@ -1,0 +1,451 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId    String   @unique @map("public_id") @db.Char(26)
+  displayName String?  @map("display_name") @db.VarChar(64)
+  phoneHash   String?  @unique @map("phone_hash") @db.Char(64)
+  phoneCipher String?  @map("phone_cipher") @db.Text
+  status      String   @default("ACTIVE") @db.VarChar(32)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  identities   UserIdentity[]
+  sessions     UserSession[]
+  projects     Project[]
+  orders       Order[]
+  entitlements Entitlement[]
+
+  @@map("users")
+}
+
+model UserIdentity {
+  id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  userId         BigInt   @map("user_id") @db.UnsignedBigInt
+  provider       String   @db.VarChar(32)
+  providerUserId String   @map("provider_user_id") @db.VarChar(191)
+  createdAt      DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([provider, providerUserId])
+  @@map("user_identities")
+}
+
+model UserSession {
+  id        BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId  String    @unique @map("public_id") @db.Char(26)
+  userId    BigInt    @map("user_id") @db.UnsignedBigInt
+  tokenHash String    @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at") @db.DateTime(3)
+  revokedAt DateTime? @map("revoked_at") @db.DateTime(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("user_sessions")
+}
+
+model ProjectTemplate {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  code      String   @unique @db.VarChar(64)
+  name      String   @db.VarChar(128)
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  versions ProjectTemplateVersion[]
+
+  @@map("project_templates")
+}
+
+model ProjectTemplateVersion {
+  id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  templateId BigInt   @map("template_id") @db.UnsignedBigInt
+  version    Int
+  status     String   @default("PUBLISHED") @db.VarChar(32)
+  definition Json?    @map("definition_json")
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  template ProjectTemplate       @relation(fields: [templateId], references: [id])
+  steps    ProjectTemplateStep[]
+  projects Project[]
+
+  @@unique([templateId, version])
+  @@map("project_template_versions")
+}
+
+model ProjectTemplateStep {
+  id                   BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+  templateVersionId    BigInt  @map("template_version_id") @db.UnsignedBigInt
+  code                 String  @db.VarChar(64)
+  title                String  @db.VarChar(128)
+  sequence             Int
+  requiresUserInput    Boolean @default(false) @map("requires_user_input")
+  requiresUserDecision Boolean @default(false) @map("requires_user_decision")
+  requiresPayment      Boolean @default(false) @map("requires_payment")
+  uiStep               Int     @map("ui_step")
+
+  templateVersion ProjectTemplateVersion @relation(fields: [templateVersionId], references: [id])
+
+  @@unique([templateVersionId, code])
+  @@index([templateVersionId, sequence])
+  @@map("project_template_steps")
+}
+
+model Project {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId          String    @unique @map("public_id") @db.Char(26)
+  userId            BigInt    @map("user_id") @db.UnsignedBigInt
+  templateVersionId BigInt    @map("template_version_id") @db.UnsignedBigInt
+  title             String    @db.VarChar(128)
+  objective         String?   @db.Text
+  currentStepCode   String?   @map("current_step_code") @db.VarChar(64)
+  progress          Int       @default(0)
+  status            String    @default("DRAFT") @db.VarChar(32)
+  revision          Int       @default(0)
+  metadata          Json?     @map("metadata_json")
+  startedAt         DateTime? @map("started_at") @db.DateTime(3)
+  completedAt       DateTime? @map("completed_at") @db.DateTime(3)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  user            User                   @relation(fields: [userId], references: [id])
+  templateVersion ProjectTemplateVersion @relation(fields: [templateVersionId], references: [id])
+  stepRuns        ProjectStepRun[]
+  decisions       ProjectDecision[]
+  events          ProjectEvent[]
+  agentRuns       AgentRun[]
+  sources         Source[]
+  artifacts       Artifact[]
+  orders          Order[]
+  assessments     SkillAssessment[]
+
+  @@index([userId, status, createdAt])
+  @@map("projects")
+}
+
+model ProjectStepRun {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId     String    @unique @map("public_id") @db.Char(26)
+  projectId    BigInt    @map("project_id") @db.UnsignedBigInt
+  nodeCode     String    @map("node_code") @db.VarChar(64)
+  status       String    @default("PENDING") @db.VarChar(32)
+  inputVersion Int       @default(1) @map("input_version")
+  input        Json?     @map("input_json")
+  output       Json?     @map("output_json")
+  startedAt    DateTime? @map("started_at") @db.DateTime(3)
+  completedAt  DateTime? @map("completed_at") @db.DateTime(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  project   Project    @relation(fields: [projectId], references: [id])
+  agentRuns AgentRun[]
+
+  @@index([projectId, nodeCode])
+  @@map("project_step_runs")
+}
+
+model ProjectDecision {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId  String   @unique @map("public_id") @db.Char(26)
+  projectId BigInt   @map("project_id") @db.UnsignedBigInt
+  nodeCode  String   @map("node_code") @db.VarChar(64)
+  action    String   @db.VarChar(64)
+  payload   Json?    @map("payload_json")
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId, nodeCode])
+  @@map("project_decisions")
+}
+
+model ProjectEvent {
+  id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId   String   @unique @map("public_id") @db.Char(26)
+  projectId  BigInt   @map("project_id") @db.UnsignedBigInt
+  agentRunId BigInt?  @map("agent_run_id") @db.UnsignedBigInt
+  type       String   @db.VarChar(64)
+  stage      String   @db.VarChar(64)
+  percent    Int?
+  message    String   @db.VarChar(512)
+  payload    Json?    @map("payload_json")
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  project Project @relation(fields: [projectId], references: [id])
+
+  @@index([projectId, id])
+  @@map("project_events")
+}
+
+model AgentRun {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId       String    @unique @map("public_id") @db.Char(26)
+  projectId      BigInt    @map("project_id") @db.UnsignedBigInt
+  stepRunId      BigInt?   @map("step_run_id") @db.UnsignedBigInt
+  nodeCode       String    @map("node_code") @db.VarChar(64)
+  idempotencyKey String    @unique @map("idempotency_key") @db.VarChar(191)
+  status         String    @default("QUEUED") @db.VarChar(32)
+  inputVersion   Int       @default(1) @map("input_version")
+  retryCount     Int       @default(0) @map("retry_count")
+  lockedBy       String?   @map("locked_by") @db.VarChar(64)
+  lockExpiresAt  DateTime? @map("lock_expires_at") @db.DateTime(3)
+  heartbeatAt    DateTime? @map("heartbeat_at") @db.DateTime(3)
+  errorCode      String?   @map("error_code") @db.VarChar(64)
+  errorMessage   String?   @map("error_message") @db.Text
+  startedAt      DateTime? @map("started_at") @db.DateTime(3)
+  completedAt    DateTime? @map("completed_at") @db.DateTime(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  project   Project         @relation(fields: [projectId], references: [id])
+  stepRun   ProjectStepRun? @relation(fields: [stepRunId], references: [id])
+  usages    ModelUsage[]
+
+  @@index([status, createdAt])
+  @@index([projectId, nodeCode])
+  @@map("agent_runs")
+}
+
+model ModelUsage {
+  id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  agentRunId     BigInt   @map("agent_run_id") @db.UnsignedBigInt
+  provider       String   @db.VarChar(64)
+  model          String   @db.VarChar(64)
+  taskType       String   @map("task_type") @db.VarChar(64)
+  promptVersion  String?  @map("prompt_version") @db.VarChar(32)
+  inputTokens    Int      @default(0) @map("input_tokens")
+  outputTokens   Int      @default(0) @map("output_tokens")
+  latencyMs      Int      @default(0) @map("latency_ms")
+  estimatedCost  Int      @default(0) @map("estimated_cost_fen")
+  status         String   @db.VarChar(32)
+  createdAt      DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id])
+
+  @@index([agentRunId])
+  @@map("model_usages")
+}
+
+model OutboxEvent {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  status      String    @default("PENDING") @db.VarChar(32)
+  topic       String    @db.VarChar(64)
+  payload     Json      @map("payload_json")
+  availableAt DateTime  @default(now()) @map("available_at") @db.DateTime(3)
+  attempts    Int       @default(0)
+  publishedAt DateTime? @map("published_at") @db.DateTime(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([status, availableAt])
+  @@map("outbox_events")
+}
+
+model Source {
+  id            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId      String   @unique @map("public_id") @db.Char(26)
+  projectId     BigInt   @map("project_id") @db.UnsignedBigInt
+  title         String   @db.VarChar(512)
+  publisher     String?  @db.VarChar(256)
+  url           String?  @db.VarChar(1024)
+  publishedAt   DateTime? @map("published_at") @db.DateTime(3)
+  accessedAt    DateTime  @default(now()) @map("accessed_at") @db.DateTime(3)
+  credibility   String    @default("UNKNOWN") @db.VarChar(32)
+  status        String    @default("VERIFIED") @db.VarChar(32)
+  summary       String?   @db.Text
+  excluded      Boolean   @default(false)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  project   Project    @relation(fields: [projectId], references: [id])
+  citations Citation[]
+
+  @@index([projectId])
+  @@map("sources")
+}
+
+model Citation {
+  id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId   String   @unique @map("public_id") @db.Char(26)
+  sourceId   BigInt   @map("source_id") @db.UnsignedBigInt
+  artifactId BigInt?  @map("artifact_id") @db.UnsignedBigInt
+  quote      String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  source   Source    @relation(fields: [sourceId], references: [id])
+  artifact Artifact? @relation(fields: [artifactId], references: [id])
+
+  @@map("citations")
+}
+
+model Artifact {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId  String   @unique @map("public_id") @db.Char(26)
+  projectId BigInt   @map("project_id") @db.UnsignedBigInt
+  type      String   @db.VarChar(64)
+  title     String   @db.VarChar(256)
+  status    String   @default("DRAFT") @db.VarChar(32)
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  project  Project           @relation(fields: [projectId], references: [id])
+  versions ArtifactVersion[]
+  exports  Export[]
+  citations Citation[]
+
+  @@index([projectId, type])
+  @@map("artifacts")
+}
+
+model ArtifactVersion {
+  id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId   String   @unique @map("public_id") @db.Char(26)
+  artifactId BigInt   @map("artifact_id") @db.UnsignedBigInt
+  version    Int
+  content    Json     @map("content_json")
+  createdBy  String   @map("created_by") @db.VarChar(32)
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  artifact Artifact @relation(fields: [artifactId], references: [id])
+
+  @@unique([artifactId, version])
+  @@map("artifact_versions")
+}
+
+model Export {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId     String    @unique @map("public_id") @db.Char(26)
+  artifactId   BigInt    @map("artifact_id") @db.UnsignedBigInt
+  format       String    @db.VarChar(16)
+  status       String    @default("PENDING") @db.VarChar(32)
+  storageKey   String?   @map("storage_key") @db.VarChar(512)
+  errorMessage String?   @map("error_message") @db.Text
+  completedAt  DateTime? @map("completed_at") @db.DateTime(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  artifact Artifact @relation(fields: [artifactId], references: [id])
+
+  @@index([artifactId, status])
+  @@map("exports")
+}
+
+model Product {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  code        String   @unique @db.VarChar(64)
+  name        String   @db.VarChar(128)
+  priceFen    Int      @map("price_fen")
+  description String?  @db.VarChar(512)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  orders Order[]
+
+  @@map("products")
+}
+
+model Order {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId    String    @unique @map("public_id") @db.Char(26)
+  userId      BigInt    @map("user_id") @db.UnsignedBigInt
+  projectId   BigInt    @map("project_id") @db.UnsignedBigInt
+  productId   BigInt    @map("product_id") @db.UnsignedBigInt
+  amountFen   Int       @map("amount_fen")
+  status      String    @default("PENDING") @db.VarChar(32)
+  paidAt      DateTime? @map("paid_at") @db.DateTime(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  user         User                 @relation(fields: [userId], references: [id])
+  project      Project              @relation(fields: [projectId], references: [id])
+  product      Product              @relation(fields: [productId], references: [id])
+  transactions PaymentTransaction[]
+
+  @@index([userId, status])
+  @@index([projectId])
+  @@map("orders")
+}
+
+model PaymentTransaction {
+  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId        String   @unique @map("public_id") @db.Char(26)
+  orderId         BigInt   @map("order_id") @db.UnsignedBigInt
+  provider        String   @db.VarChar(32)
+  providerTradeNo String?  @map("provider_trade_no") @db.VarChar(128)
+  amountFen       Int      @map("amount_fen")
+  status          String   @db.VarChar(32)
+  rawPayload      Json?    @map("raw_payload_json")
+  createdAt       DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([orderId])
+  @@map("payment_transactions")
+}
+
+model Entitlement {
+  id        BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId  String    @unique @map("public_id") @db.Char(26)
+  userId    BigInt    @map("user_id") @db.UnsignedBigInt
+  projectId BigInt?   @map("project_id") @db.UnsignedBigInt
+  type      String    @db.VarChar(64)
+  remaining Int       @default(0)
+  metadata  Json?     @map("metadata_json")
+  expiresAt DateTime? @map("expires_at") @db.DateTime(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  user         User                      @relation(fields: [userId], references: [id])
+  transactions EntitlementTransaction[]
+
+  @@index([userId, type])
+  @@map("entitlements")
+}
+
+model EntitlementTransaction {
+  id            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  entitlementId BigInt   @map("entitlement_id") @db.UnsignedBigInt
+  delta         Int
+  reason        String   @db.VarChar(128)
+  orderId       BigInt?  @map("order_id") @db.UnsignedBigInt
+  createdAt     DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  entitlement Entitlement @relation(fields: [entitlementId], references: [id])
+
+  @@map("entitlement_transactions")
+}
+
+model SkillDimension {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  code        String   @unique @db.VarChar(64)
+  name        String   @db.VarChar(128)
+  description String?  @db.VarChar(512)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  assessments SkillAssessment[]
+
+  @@map("skill_dimensions")
+}
+
+model SkillAssessment {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  publicId    String   @unique @map("public_id") @db.Char(26)
+  projectId   BigInt   @map("project_id") @db.UnsignedBigInt
+  dimensionId BigInt   @map("dimension_id") @db.UnsignedBigInt
+  score       Int
+  evidence    Json?    @map("evidence_json")
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  project   Project        @relation(fields: [projectId], references: [id])
+  dimension SkillDimension @relation(fields: [dimensionId], references: [id])
+
+  @@unique([projectId, dimensionId])
+  @@map("skill_assessments")
+}
