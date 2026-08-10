@@ -9,6 +9,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.7.1",
     "@stepdone/agent-core": "workspace:^",
     "@stepdone/auth": "workspace:^",
     "@stepdone/config": "workspace:^",
@@ -17,10 +18,18 @@
     "@stepdone/payments": "workspace:^",
     "@stepdone/project-engine": "workspace:^",
     "@stepdone/schemas": "workspace:^",
+    "@tanstack/react-query": "^5.101.4",
+    "@tiptap/pm": "^3.29.2",
+    "@tiptap/react": "^3.29.2",
+    "@tiptap/starter-kit": "^3.29.2",
+    "echarts": "^6.1.0",
+    "echarts-for-react": "^3.0.6",
     "ioredis": "^6.0.0",
     "next": "16.3.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-hook-form": "^7.85.0",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

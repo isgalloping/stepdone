@@ -9,9 +9,11 @@
     "lint": "turbo run lint",
     "db:migrate": "pnpm --filter @stepdone/database exec prisma migrate dev",
     "db:seed": "pnpm --filter @stepdone/database exec prisma db seed",
-    "docker:up": "docker compose -f infrastructure/docker/docker-compose.yml up -d"
+    "docker:up": "docker compose -f infrastructure/docker/docker-compose.yml up -d",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "dotenv": "^17.4.2",
     "turbo": "^2.5.0",
     "typescript": "^5.8.0"

@@ -1,69 +1,119 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api-client";
+
+type ProjectItem = {
+  publicId: string;
+  title: string;
+  status: string;
+  currentStepCode: string | null;
+  progress: number;
+  updatedAt: string;
+};
+
+export default function HomePage() {
+  const me = useQuery({
+    queryKey: ["me"],
+    queryFn: async () =>
+      api<{ publicId: string; displayName: string | null }>("/api/auth/me"),
+  });
+  const projects = useQuery({
+    queryKey: ["projects"],
+    enabled: Boolean(me.data?.success),
+    queryFn: async () => api<{ projects: ProjectItem[] }>("/api/projects"),
+  });
+
+  const recent =
+    projects.data?.success ? projects.data.data.projects.slice(0, 3) : [];
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <div style={{ maxWidth: 960, margin: "0 auto", padding: "1.25rem" }}>
+      <section
+        style={{
+          background:
+            "linear-gradient(160deg, #e8f1ff 0%, #ffffff 55%, #f5f7fb 100%)",
+          border: "1px solid var(--sd-border)",
+          borderRadius: 20,
+          padding: "2rem 1.5rem",
+          marginBottom: "1.5rem",
+        }}
+      >
+        <p className="sd-chip">真实任务交付平台</p>
+        <h1 style={{ fontSize: "clamp(1.8rem, 4vw, 2.6rem)", margin: "0.8rem 0 0.4rem" }}>
+          StepDone AI
+        </h1>
+        <p className="sd-muted" style={{ marginTop: 0 }}>
+          一步一步，把事情做成。
+        </p>
+        <h2 style={{ fontSize: "1.45rem", margin: "1.4rem 0 0.5rem" }}>
+          今天想做成什么？
+        </h2>
+        <p className="sd-muted" style={{ marginTop: 0, maxWidth: 520 }}>
+          选择一个真实任务，跟随 AI 项目导师一步步完成可汇报的成果。
+        </p>
+        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginTop: "1.25rem" }}>
+          <Link href="/projects/new" className="sd-btn" data-testid="start-task">
+            + 开始一个真实任务
+          </Link>
+          <Link href="/examples" className="sd-btn sd-btn-secondary">
+            查看成果示例
+          </Link>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </section>
+
+      <section style={{ marginBottom: "1.5rem" }}>
+        <h3 style={{ marginBottom: "0.75rem" }}>热门任务</h3>
+        <div style={{ display: "grid", gap: "0.75rem", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+          <article className="sd-card">
+            <h4 style={{ margin: "0 0 0.4rem" }}>竞品分析</h4>
+            <p className="sd-muted" style={{ marginTop: 0 }}>
+              从目标定义、资料搜集到完整报告，完成一份有来源、能汇报的竞品分析。
+            </p>
+            <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginBottom: "1rem" }}>
+              <span className="sd-chip">约 30～60 分钟</span>
+              <span className="sd-chip">PDF/PPT</span>
+            </div>
+            <Link href="/projects/new" className="sd-btn">
+              开始竞品分析
+            </Link>
+          </article>
+          <article className="sd-card" style={{ opacity: 0.75 }}>
+            <h4 style={{ margin: "0 0 0.4rem" }}>行业研究</h4>
+            <p className="sd-muted">即将开放</p>
+          </article>
+          <article className="sd-card" style={{ opacity: 0.75 }}>
+            <h4 style={{ margin: "0 0 0.4rem" }}>营销方案</h4>
+            <p className="sd-muted">即将开放</p>
+          </article>
         </div>
-      </main>
+      </section>
+
+      <section>
+        <h3 style={{ marginBottom: "0.75rem" }}>最近项目</h3>
+        {!me.data?.success ? (
+          <div className="sd-card sd-muted">登录后可继续最近项目。</div>
+        ) : recent.length === 0 ? (
+          <div className="sd-card sd-muted">
+            你还没有开始项目。选择一个真实任务，逐步完成第一个成果。
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: "0.75rem" }}>
+            {recent.map((p) => (
+              <Link key={p.publicId} href={`/projects/${p.publicId}/plan`} className="sd-card">
+                <strong>{p.title}</strong>
+                <div className="sd-muted" style={{ marginTop: 4 }}>
+                  {p.currentStepCode ?? p.status} · 进度 {p.progress}%
+                </div>
+                <div style={{ marginTop: 8, color: "var(--sd-primary)", fontWeight: 600 }}>
+                  继续项目 →
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
