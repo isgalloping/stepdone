@@ -7,6 +7,10 @@ import { runFixture } from "./fixtures/index";
 import type { AgentJob, WorkerJob } from "./queues";
 import { buildIdempotencyKey } from "@stepdone/agent-core";
 import { handleExportJob } from "./export-runner";
+import {
+  aggregateParticipation,
+  scoresFromParticipation,
+} from "./ability-aggregate";
 
 const workerId = `worker_${process.pid}`;
 const redis = new IORedis(process.env.REDIS_URL ?? "redis://127.0.0.1:6379", {
@@ -214,6 +218,48 @@ export async function handleAgentJob(job: Job<AgentJob>) {
       return;
     }
 
+    let finalOutput = result.output as Record<string, unknown>;
+    if (data.nodeCode === "ABILITY_REPORT") {
+      const projectId = agentRun.projectId;
+      const [mentorAnswers, judgments, userVersions, userSources] =
+        await Promise.all([
+          prisma.projectDecision.count({
+            where: { projectId, action: "MENTOR_ANSWER" },
+          }),
+          prisma.projectDecision.count({
+            where: {
+              projectId,
+              action: { in: ["SUBMIT_JUDGMENTS", "CONFIRM_JUDGMENT"] },
+            },
+          }),
+          prisma.artifactVersion.count({
+            where: { createdBy: "USER", artifact: { projectId } },
+          }),
+          prisma.source.count({
+            where: { projectId, publisher: "用户添加" },
+          }),
+        ]);
+      const participation = aggregateParticipation({
+        mentorAnswers,
+        judgments,
+        userVersions,
+        userSources,
+      });
+      const skills = scoresFromParticipation(participation);
+      const fixtureNarrative =
+        typeof result.output === "object" &&
+        result.output &&
+        "narrative" in result.output &&
+        typeof (result.output as { narrative?: unknown }).narrative === "string"
+          ? (result.output as { narrative: string }).narrative
+          : "你在本次项目中保持了主动参与，建议下次先独立列出候选竞品再对照 AI 建议。";
+      finalOutput = {
+        participation,
+        skills,
+        narrative: fixtureNarrative,
+      };
+    }
+
     await prisma.$transaction(async (tx) => {
       await tx.agentRun.update({
         where: { id: agentRun.id },
@@ -229,7 +275,7 @@ export async function handleAgentJob(job: Job<AgentJob>) {
           where: { id: agentRun.stepRunId },
           data: {
             status: "SUCCEEDED",
-            output: result.output as object,
+            output: finalOutput as object,
             completedAt: new Date(),
           },
         });
@@ -374,6 +420,41 @@ export async function handleAgentJob(job: Job<AgentJob>) {
             status: "AI_PROCESSING",
             currentStepCode: "USER_JUDGMENT",
             progress: 65,
+          },
+        });
+      } else if (data.nodeCode === "ABILITY_REPORT") {
+        const skills = (finalOutput.skills ?? {}) as Record<string, number>;
+        const participation = finalOutput.participation ?? {};
+        const dimensions = await tx.skillDimension.findMany();
+        for (const dim of dimensions) {
+          const score = skills[dim.name];
+          if (typeof score !== "number") continue;
+          await tx.skillAssessment.upsert({
+            where: {
+              projectId_dimensionId: {
+                projectId: agentRun.projectId,
+                dimensionId: dim.id,
+              },
+            },
+            create: {
+              publicId: newPublicId(),
+              projectId: agentRun.projectId,
+              dimensionId: dim.id,
+              score,
+              evidence: { participation },
+            },
+            update: {
+              score,
+              evidence: { participation },
+            },
+          });
+        }
+        await tx.project.update({
+          where: { id: agentRun.projectId },
+          data: {
+            status: "ACTIVE",
+            currentStepCode: "ABILITY_REPORT",
+            progress: 100,
           },
         });
       } else {
