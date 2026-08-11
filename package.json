@@ -1,26 +1,21 @@
 {
   "name": "stepdone",
-  "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "next": "16.3.0",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "db:migrate": "pnpm --filter @stepdone/database exec prisma migrate dev",
+    "db:seed": "pnpm --filter @stepdone/database exec prisma db seed",
+    "docker:up": "docker compose -f infrastructure/docker/docker-compose.yml up -d",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.3.0",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "@playwright/test": "^1.62.1",
+    "dotenv": "^17.4.2",
+    "turbo": "^2.5.0",
+    "typescript": "^5.8.0"
   }
 }

@@ -1,0 +1,156 @@
+@import "tailwindcss";
+
+:root {
+  --sd-bg: #f5f7fb;
+  --sd-surface: #ffffff;
+  --sd-primary: #1f6feb;
+  --sd-primary-pressed: #1558c0;
+  --sd-text: #0f172a;
+  --sd-muted: #64748b;
+  --sd-border: #e2e8f0;
+  --sd-success: #16a34a;
+  --sd-warning: #ca8a04;
+  --sd-danger: #dc2626;
+  --sd-soft: #e8f1ff;
+  --background: var(--sd-bg);
+  --foreground: var(--sd-text);
+  --font-sans: "PingFang SC", "Noto Sans SC", "Segoe UI", sans-serif;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--sd-primary);
+  --color-muted: var(--sd-muted);
+  --color-border: var(--sd-border);
+  --font-sans: var(--font-sans);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--sd-bg);
+  color: var(--sd-text);
+  font-family: var(--font-sans);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.sd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0.7rem 1.1rem;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--sd-primary);
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sd-btn:hover {
+  background: var(--sd-primary-pressed);
+}
+
+.sd-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.sd-btn-secondary {
+  background: white;
+  color: var(--sd-text);
+  border-color: var(--sd-border);
+}
+
+.sd-card {
+  background: var(--sd-surface);
+  border: 1px solid var(--sd-border);
+  border-radius: 16px;
+  padding: 1.25rem;
+}
+
+.sd-input,
+.sd-select,
+.sd-textarea {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--sd-border);
+  border-radius: 10px;
+  padding: 0.65rem 0.85rem;
+  background: white;
+}
+
+.sd-textarea {
+  min-height: 110px;
+  resize: vertical;
+}
+
+.sd-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.sd-muted {
+  color: var(--sd-muted);
+}
+
+.sd-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: var(--sd-soft);
+  color: var(--sd-primary);
+  font-size: 0.8rem;
+}
+
+.mobile-tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: white;
+  border-top: 1px solid var(--sd-border);
+  min-height: 56px;
+  z-index: 40;
+}
+
+@media (min-width: 768px) {
+  .mobile-tab-bar {
+    display: none !important;
+  }
+  .desktop-only-nav {
+    display: flex !important;
+  }
+}
+
+@media (max-width: 767px) {
+  .desktop-only-nav {
+    display: none !important;
+  }
+  .page-with-tabs {
+    padding-bottom: 72px;
+  }
+}

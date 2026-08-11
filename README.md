@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# StepDone AI（逐成 AI）
 
-## Getting Started
+一步一步，把事情做成。 / Step by step. Get it done.
 
-First, run the development server:
+本仓库当前实现 **0.0.1 可演示垂直切片** 的 Slice A：monorepo、MySQL/Redis、假 Agent Worker、mock 登录/支付闸门与主链路 API。
+
+## 本地启动
+
+前置：Node.js 20+、Docker Desktop、pnpm 9（`corepack enable`）。
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# 1. 依赖
+pnpm install
+
+# 2. 环境变量
+cp .env.example .env
+
+# 3. 基础设施
+pnpm docker:up
+
+# 4. 数据库
+pnpm db:migrate
+pnpm db:seed
+
+# 5. 启动 Web + Worker（两个终端）
+pnpm --filter @stepdone/web dev
+pnpm --filter @stepdone/agent-worker dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- Web: http://localhost:3000  
+- Worker health: http://127.0.0.1:4101/health/live  
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## API Smoke
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+node scripts/smoke-main-path.mjs
+```
 
-## Learn More
+期望输出包含 `PAYMENT_OK`、`REPORT_NODE_OK`、`SMOKE_PASS`。
 
-To learn more about Next.js, take a look at the following resources:
+## UI E2E
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+pnpm test:e2e
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+覆盖：首页 → 填表 → mock 登录恢复 → 六步 → 付费 → 报告导出。
 
-## Deploy on Vercel
+## 关键路径
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| 能力 | 路径 |
+|---|---|
+| Mock 登录 | `POST /api/auth/mock-login` |
+| 创建项目 | `POST /api/projects` |
+| 步骤决策 | `POST /api/projects/:id/steps/:code/decision` |
+| 状态轮询 | `GET /api/projects/:id/status` |
+| SSE | `GET /api/projects/:id/events` |
+| Mock 支付 | `POST /api/orders` → `POST /api/payments/mock/confirm` |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 文档
+
+- 设计规格：`docs/superpowers/specs/2026-08-10-stepdone-0.0.1-vertical-slice-design.md`
+- 实现计划 A：`docs/superpowers/plans/2026-08-10-stepdone-0.0.1-slice-a-foundation.md`
+- 实现计划 B（UI）：`docs/superpowers/plans/2026-08-10-stepdone-0.0.1-slice-b-ui-e2e.md`
+
+## 说明
+
+- `MOCK_PAYMENTS=1` 时允许 mock 支付确认；生产环境勿开启。
+- AI / 搜索 / 微信均为 mock；状态机、订单权益、Outbox/队列为真实边界。
