@@ -77,6 +77,21 @@ export default function ReportPage() {
     ? artifacts.data.data.artifacts.find((a) => a.type === "ONLINE_REPORT")
     : undefined;
   const paid = artifacts.data?.success ? artifacts.data.data.paid : false;
+
+  const artifactDetail = useQuery({
+    queryKey: ["artifact", report?.publicId],
+    queryFn: async () =>
+      api<{
+        version: number;
+        versionsCount: number;
+        content: {
+          blocks?: Array<{ type: string; text?: string; level?: number }>;
+        } | null;
+      }>(`/api/artifacts/${report!.publicId}`),
+    enabled: Boolean(report?.publicId && paid),
+  });
+  const version =
+    artifactDetail.data?.success ? artifactDetail.data.data.version : 0;
   const citationList =
     citations.data?.success ? citations.data.data.citations : [];
   const canPpt =
@@ -116,33 +131,42 @@ export default function ReportPage() {
     }
   }, [editor, initialText, report?.content?.blocks?.length]);
 
-  function applySuggest() {
-    if (!editor || !suggest) return;
-    editor.chain().focus().insertContent(`<p>${suggest}</p>`).run();
-    setSuggest("");
-  }
-
   async function persistContent() {
     if (!report || !editor) return;
     const text = editor.getText();
     setSaveMsg("正在保存正文…");
-    const res = await api(`/api/artifacts/${report.publicId}`, {
-      method: "PATCH",
-      body: JSON.stringify({
-        content: {
-          type: "document",
-          blocks: text
-            .split(/\n+/)
-            .filter(Boolean)
-            .map((t, i) => ({
-              id: `b_${i + 1}`,
-              type: "paragraph",
-              text: t,
-            })),
-        },
-      }),
-    });
-    setSaveMsg(res.success ? "正文已保存" : res.error.message);
+    const res = await api<{ version: number }>(
+      `/api/artifacts/${report.publicId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          content: {
+            type: "document",
+            blocks: text
+              .split(/\n+/)
+              .filter(Boolean)
+              .map((t, i) => ({
+                id: `b_${i + 1}`,
+                type: "paragraph",
+                text: t,
+              })),
+          },
+        }),
+      },
+    );
+    if (res.success) {
+      setSaveMsg("正文已保存");
+      await Promise.all([artifacts.refetch(), artifactDetail.refetch()]);
+    } else {
+      setSaveMsg(res.error.message);
+    }
+  }
+
+  async function adoptSuggest() {
+    if (!editor || !suggest) return;
+    editor.chain().focus().insertContent(`<p>${suggest}</p>`).run();
+    setSuggest("");
+    await persistContent();
   }
 
   async function reportRegenerate() {
@@ -250,7 +274,7 @@ export default function ReportPage() {
             <div className="sd-card" style={{ marginTop: 8 }}>
               <div className="sd-muted">AI 建议</div>
               <p>{suggest}</p>
-              <button className="sd-btn" onClick={applySuggest}>
+              <button className="sd-btn" onClick={() => void adoptSuggest()}>
                 采用
               </button>
             </div>
@@ -338,6 +362,11 @@ export default function ReportPage() {
 
         {exportMsg ? <p className="sd-muted">{exportMsg}</p> : null}
         {saveMsg ? <p className="sd-muted">{saveMsg}</p> : null}
+        {report ? (
+          <p className="sd-muted" data-testid="report-version">
+            版本 v{version}
+          </p>
+        ) : null}
 
         <div
           style={{

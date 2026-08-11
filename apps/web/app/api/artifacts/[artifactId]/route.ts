@@ -15,6 +15,7 @@ export async function GET(_request: Request, ctx: Ctx) {
       include: {
         project: true,
         versions: { orderBy: { version: "desc" }, take: 1 },
+        _count: { select: { versions: true } },
       },
     });
     if (!artifact || artifact.project.userId !== user.id) {
@@ -30,6 +31,7 @@ export async function GET(_request: Request, ctx: Ctx) {
       title: artifact.title,
       content: artifact.versions[0]?.content ?? null,
       version: artifact.versions[0]?.version ?? 0,
+      versionsCount: artifact._count.versions,
     });
   } catch (error) {
     const err = error as { code?: string; status?: number };
