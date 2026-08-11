@@ -13,7 +13,11 @@ cd "$(dirname "$0")/.."
 # the default containerd snapshotter inside the VM.
 if ! command -v dockerd >/dev/null 2>&1 || ! command -v fuse-overlayfs >/dev/null 2>&1; then
   sudo apt-get update -y
+  # --force-conf* keeps existing conffiles (e.g. /etc/fuse.conf) without an
+  # interactive dpkg prompt, which otherwise aborts the non-interactive install.
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    -o Dpkg::Options::=--force-confdef \
+    -o Dpkg::Options::=--force-confold \
     docker.io docker-compose-v2 fuse-overlayfs
 fi
 
