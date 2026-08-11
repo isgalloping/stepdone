@@ -1,12 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useQuery } from "@tanstack/react-query";
 import { WorkspaceShell } from "@/components/workspace/workspace-shell";
 import { api } from "@/lib/api-client";
+
+type SaveState = "idle" | "saving" | "saved" | "error";
+
+const SAVE_LABEL: Record<SaveState, string> = {
+  idle: "",
+  saving: "正在保存…",
+  saved: "已自动保存",
+  error: "保存失败，正在重试",
+};
 
 export default function ReportPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -14,6 +23,11 @@ export default function ReportPage() {
   const [suggest, setSuggest] = useState("");
   const [exporting, setExporting] = useState(false);
   const [exportMsg, setExportMsg] = useState("");
+  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const [version, setVersion] = useState<number | null>(null);
+  const artifactIdRef = useRef<string | null>(null);
+  const loadedRef = useRef(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const artifacts = useQuery({
     queryKey: ["artifacts", projectId],
@@ -46,21 +60,78 @@ export default function ReportPage() {
     }
   }, [artifacts.data, paid, projectId, router]);
 
+  useEffect(() => {
+    if (report?.publicId) artifactIdRef.current = report.publicId;
+  }, [report?.publicId]);
+
   const initialText =
     report?.content?.blocks
       ?.map((b) => b.text)
       .filter(Boolean)
       .join("\n\n") ?? "完整报告生成中…";
 
+  // Serialize the editor into the report Block JSON (§28) and autosave it as
+  // the working USER artifact version (§32).
+  const save = useCallback(async (ed: Editor) => {
+    const id = artifactIdRef.current;
+    if (!id) return;
+    const doc = ed.getJSON();
+    const nodes = (doc.content ?? []) as Array<{
+      type?: string;
+      attrs?: { level?: number };
+      content?: Array<{ text?: string }>;
+    }>;
+    const blocks = nodes
+      .map((node, i) => {
+        const text = (node.content ?? []).map((c) => c.text ?? "").join("");
+        return node.type === "heading"
+          ? { id: `b${i}`, type: "heading", level: node.attrs?.level ?? 1, text }
+          : { id: `b${i}`, type: "paragraph", text };
+      })
+      .filter((b) => b.text.length > 0);
+    setSaveState("saving");
+    const res = await api<{ version: number }>(`/api/artifacts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ content: { type: "document", blocks } }),
+    });
+    if (res.success) {
+      setSaveState("saved");
+      setVersion(res.data.version);
+    } else {
+      setSaveState("error");
+    }
+  }, []);
+
+  const scheduleSave = useCallback(
+    (ed: Editor) => {
+      setSaveState("saving");
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => void save(ed), 1200);
+    },
+    [save],
+  );
+
   const editor = useEditor({
     extensions: [StarterKit],
     content: `<p>${initialText.replace(/\n\n/g, "</p><p>")}</p>`,
     immediatelyRender: false,
+    onUpdate: ({ editor: ed }) => {
+      if (loadedRef.current) scheduleSave(ed);
+    },
+    onBlur: ({ editor: ed }) => {
+      if (!loadedRef.current) return;
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      void save(ed);
+    },
   });
 
+  // Load the persisted content once (avoid clobbering edits on each refetch).
   useEffect(() => {
-    if (editor && report?.content?.blocks?.length) {
-      editor.commands.setContent(`<p>${initialText.replace(/\n\n/g, "</p><p>")}</p>`);
+    if (editor && !loadedRef.current && report?.content?.blocks?.length) {
+      editor.commands.setContent(
+        `<p>${initialText.replace(/\n\n/g, "</p><p>")}</p>`,
+      );
+      loadedRef.current = true;
     }
   }, [editor, initialText, report?.content?.blocks?.length]);
 
@@ -68,6 +139,7 @@ export default function ReportPage() {
     if (!editor || !suggest) return;
     editor.chain().focus().insertContent(`<p>${suggest}</p>`).run();
     setSuggest("");
+    scheduleSave(editor);
   }
 
   async function runExport(format: "PDF" | "PPTX") {
@@ -162,8 +234,14 @@ export default function ReportPage() {
     >
       <div className="sd-card">
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <h1 style={{ marginTop: 0 }}>成果编辑</h1>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div>
+            <h1 style={{ marginTop: 0, marginBottom: 4 }}>成果编辑</h1>
+            <div className="sd-muted" style={{ fontSize: 13 }} data-testid="save-status">
+              {SAVE_LABEL[saveState]}
+              {version ? `${saveState !== "idle" ? " · " : ""}版本 v${version}` : ""}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
             <button
               className="sd-btn"
               onClick={() => runExport("PDF")}
