@@ -85,8 +85,7 @@ export default function ReportPage() {
       }
       const exportId = created.data.publicId;
       // Poll the export status until COMPLETED (real async export pipeline).
-      const deadline = Date.now() + 30_000;
-      while (Date.now() < deadline) {
+      for (let attempt = 0; attempt < 30; attempt++) {
         await new Promise((r) => setTimeout(r, 1000));
         const status = await api<{ status: string; downloadUrl: string | null }>(
           `/api/exports/${exportId}`,
