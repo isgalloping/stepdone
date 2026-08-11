@@ -10,20 +10,28 @@ COMPOSE_FILE="infrastructure/docker/docker-compose.yml"
 
 # 1. Ensure the Docker daemon is running. fuse-overlayfs avoids the nested
 #    overlay mount failures seen with the default containerd snapshotter.
-if ! docker info >/dev/null 2>&1; then
+#    Probe with `sudo docker` so readiness does not depend on the invoking
+#    shell having picked up the `docker` group membership yet.
+if ! sudo docker info >/dev/null 2>&1; then
   echo "cloud-agent-start: starting dockerd"
-  sudo rm -f /var/run/docker.pid 2>/dev/null || true
+  # Remove stale pid/log first: a log left by a prior boot may be owned by
+  # another user, which blocks re-creating it via redirection.
+  sudo rm -f /var/run/docker.pid /tmp/dockerd.log 2>/dev/null || true
   sudo sh -c 'dockerd >/tmp/dockerd.log 2>&1 &'
   for _ in $(seq 1 30); do
-    docker info >/dev/null 2>&1 && break
+    sudo docker info >/dev/null 2>&1 && break
     sleep 1
   done
 fi
-if ! docker info >/dev/null 2>&1; then
+if ! sudo docker info >/dev/null 2>&1; then
   echo "cloud-agent-start: dockerd failed to start" >&2
   tail -n 40 /tmp/dockerd.log >&2 || true
   exit 1
 fi
+
+# Make the socket usable by the non-root user so the repo's plain `docker`
+# commands (docker:up) and the terminals work without sudo.
+sudo chmod 666 /var/run/docker.sock 2>/dev/null || true
 
 # 2. Bring up infrastructure (idempotent; reuses running containers).
 docker compose -f "$COMPOSE_FILE" up -d
