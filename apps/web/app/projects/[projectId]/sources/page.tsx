@@ -13,6 +13,9 @@ export default function SourcesPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const [addingUrl, setAddingUrl] = useState(false);
+  const [url, setUrl] = useState("");
+  const [title, setTitle] = useState("");
   const [error, setError] = useState("");
 
   const sources = useQuery({
@@ -66,6 +69,33 @@ export default function SourcesPage() {
       setError("网络异常，请重试");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function addSourceUrl() {
+    if (!url.trim()) return;
+    setAddingUrl(true);
+    setError("");
+    try {
+      const res = await api(`/api/projects/${projectId}/sources`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: title.trim() || url.trim(),
+          url: url.trim(),
+          publisher: "用户添加",
+        }),
+      });
+      if (!res.success) {
+        setError(res.error.message);
+        return;
+      }
+      setUrl("");
+      setTitle("");
+      await sources.refetch();
+    } catch {
+      setError("网络异常，请重试");
+    } finally {
+      setAddingUrl(false);
     }
   }
 
@@ -124,6 +154,29 @@ export default function SourcesPage() {
               </button>
             </div>
           ))}
+        </div>
+        <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
+          <input
+            className="sd-input"
+            placeholder="资料链接（https://…）"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <input
+            className="sd-input"
+            placeholder="标题（可选）"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <button
+            className="sd-btn sd-btn-secondary"
+            style={{ width: "100%" }}
+            disabled={!url.trim() || addingUrl}
+            onClick={addSourceUrl}
+            data-testid="add-source-url"
+          >
+            {addingUrl ? "添加中…" : "添加资料链接"}
+          </button>
         </div>
         {error ? <p style={{ color: "var(--sd-danger)" }}>{error}</p> : null}
         <div style={{ display: "grid", gap: 8, marginTop: 16 }}>

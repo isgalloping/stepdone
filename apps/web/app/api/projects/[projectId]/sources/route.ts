@@ -51,6 +51,14 @@ export async function POST(request: Request, ctx: Ctx) {
       summary?: string;
     };
     if (!body.title) return jsonErr("VALIDATION_ERROR", "title required", 400);
+    if (body.url) {
+      try {
+        const u = new URL(body.url);
+        if (!/^https?:$/.test(u.protocol)) throw new Error("bad");
+      } catch {
+        return jsonErr("VALIDATION_ERROR", "url 无效", 400);
+      }
+    }
     const source = await prisma.source.create({
       data: {
         publicId: newPublicId(),
