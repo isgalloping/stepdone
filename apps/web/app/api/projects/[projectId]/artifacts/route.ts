@@ -2,7 +2,11 @@ import { prisma } from "@stepdone/database";
 import { ErrorCodes } from "@stepdone/domain";
 import { jsonOk, jsonErr } from "@/lib/api";
 import { requireUser } from "@/lib/session";
-import { getOwnedProject, userHasPaidEntitlement } from "@/lib/projects";
+import {
+  getOwnedProject,
+  userHasPaidEntitlement,
+  userHasEntitlement,
+} from "@/lib/projects";
 
 type Ctx = { params: Promise<{ projectId: string }> };
 
@@ -16,6 +20,12 @@ export async function GET(_request: Request, ctx: Ctx) {
     }
 
     const paid = await userHasPaidEntitlement(user.id, project.id);
+    const [canExportPdf, canExportPptx] = paid
+      ? await Promise.all([
+          userHasEntitlement(user.id, project.id, "REPORT_EXPORT"),
+          userHasEntitlement(user.id, project.id, "PPT_EXPORT"),
+        ])
+      : [false, false];
     const artifacts = await prisma.artifact.findMany({
       where: { projectId: project.id },
       include: {
@@ -25,6 +35,8 @@ export async function GET(_request: Request, ctx: Ctx) {
 
     return jsonOk({
       paid,
+      canExportPdf,
+      canExportPptx,
       artifacts: artifacts.map((a) => ({
         publicId: a.publicId,
         type: a.type,
