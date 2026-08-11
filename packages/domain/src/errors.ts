@@ -6,6 +6,7 @@ export const ErrorCodes = {
   PAYMENT_NOT_ALLOWED: "PAYMENT_NOT_ALLOWED",
   ENTITLEMENT_REQUIRED: "ENTITLEMENT_REQUIRED",
   AGENT_NOT_RETRYABLE: "AGENT_NOT_RETRYABLE",
+  QUALITY_WARNING: "QUALITY_WARNING",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

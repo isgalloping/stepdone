@@ -9,6 +9,7 @@ import { WorkspaceShell } from "@/components/workspace/workspace-shell";
 import { CitationDrawer } from "@/components/workspace/citation-drawer";
 import { api } from "@/lib/api-client";
 import { useProject } from "@/hooks/use-project";
+import type { QualityIssue } from "@/lib/quality";
 
 export default function ReportPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -21,6 +22,10 @@ export default function ReportPage() {
   const [saveMsg, setSaveMsg] = useState("");
   const [citationsOpen, setCitationsOpen] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [forceConfirm, setForceConfirm] = useState<{
+    format: "PDF" | "PPTX";
+    issues: QualityIssue[];
+  } | null>(null);
 
   useEffect(() => {
     if (project.data?.success) setDraftTitle(project.data.data.title);
@@ -159,24 +164,7 @@ export default function ReportPage() {
     await Promise.all([artifacts.refetch(), entitlements.refetch()]);
   }
 
-  async function exportFile(format: "PDF" | "PPTX") {
-    if (!report) return;
-    setExporting(format);
-    setExportMsg(`正在生成 ${format}…`);
-    const created = await api<{ exportPublicId: string }>(
-      `/api/artifacts/${report.publicId}/exports`,
-      {
-        method: "POST",
-        body: JSON.stringify({ format }),
-      },
-    );
-    if (!created.success) {
-      setExporting(null);
-      setExportMsg(created.error.message);
-      return;
-    }
-
-    const exportId = created.data.exportPublicId;
+  async function pollExport(exportId: string) {
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 800));
       const st = await api<{
@@ -198,6 +186,38 @@ export default function ReportPage() {
     }
     setExporting(null);
     setExportMsg("导出超时，请稍后重试");
+  }
+
+  async function exportFile(format: "PDF" | "PPTX", force = false) {
+    if (!report) return;
+    setExporting(format);
+    setExportMsg(`正在生成 ${format}…`);
+    setForceConfirm(null);
+    const created = await api<{ exportPublicId: string }>(
+      `/api/artifacts/${report.publicId}/exports`,
+      {
+        method: "POST",
+        body: JSON.stringify({ format, force }),
+      },
+    );
+    if (!created.success) {
+      setExporting(null);
+      if (created.error.code === "QUALITY_WARNING") {
+        const details = created.error.details as
+          | { issues?: QualityIssue[] }
+          | undefined;
+        setForceConfirm({
+          format,
+          issues: details?.issues ?? [],
+        });
+        setExportMsg(created.error.message);
+        return;
+      }
+      setExportMsg(created.error.message);
+      return;
+    }
+
+    await pollExport(created.data.exportPublicId);
   }
 
   return (
@@ -336,6 +356,49 @@ export default function ReportPage() {
         onClose={() => setCitationsOpen(false)}
         citations={citationList}
       />
+      {forceConfirm ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.4)",
+            zIndex: 60,
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+        >
+          <div className="sd-card" style={{ maxWidth: 440, width: "100%" }}>
+            <h3 style={{ marginTop: 0 }}>存在未处理的质量问题</h3>
+            <p className="sd-muted">确认后可强制导出，系统会记录强制导出决策。</p>
+            <ul style={{ paddingLeft: 18, margin: "12px 0" }}>
+              {forceConfirm.issues.map((issue) => (
+                <li key={issue.id}>
+                  [{issue.severity}] {issue.message}
+                </li>
+              ))}
+            </ul>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="sd-btn"
+                data-testid="export-force-confirm"
+                onClick={() => void exportFile(forceConfirm.format, true)}
+              >
+                仍要强制导出
+              </button>
+              <button
+                className="sd-btn sd-btn-secondary"
+                onClick={() => {
+                  setForceConfirm(null);
+                  setExportMsg("");
+                }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </WorkspaceShell>
   );
 }

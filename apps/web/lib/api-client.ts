@@ -2,7 +2,12 @@ export type ApiResult<T> =
   | { success: true; data: T; requestId: string }
   | {
       success: false;
-      error: { code: string; message: string; retryable?: boolean };
+      error: {
+        code: string;
+        message: string;
+        retryable?: boolean;
+        details?: unknown;
+      };
       requestId: string;
     };
 

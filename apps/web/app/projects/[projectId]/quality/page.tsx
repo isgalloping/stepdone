@@ -3,14 +3,9 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { WorkspaceShell } from "@/components/workspace/workspace-shell";
+import { api } from "@/lib/api-client";
+import type { QualityIssue } from "@/lib/quality";
 import { useProjectSteps } from "@/hooks/use-project";
-
-type Issue = {
-  id: string;
-  severity: string;
-  message: string;
-  status: "OPEN" | "RESOLVED";
-};
 
 const SCORE_LABELS: Record<string, string> = {
   accuracy: "准确性",
@@ -28,22 +23,56 @@ export default function QualityPage() {
   const run = steps.data?.success
     ? steps.data.data.runs.find((r) => r.nodeCode === "QUALITY_REVIEW")
     : undefined;
-  const output = (run?.output ?? {}) as {
-    scores?: Record<string, number>;
-    issues?: Issue[];
-  };
-  const [issues, setIssues] = useState<Issue[]>([]);
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const [issues, setIssues] = useState<QualityIssue[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState("");
 
   useEffect(() => {
-    if (output.issues?.length) setIssues(output.issues);
-  }, [output.issues]);
+    let cancelled = false;
+    void (async () => {
+      const res = await api<{
+        scores: Record<string, number>;
+        issues: QualityIssue[];
+      }>(`/api/projects/${projectId}/quality-check`);
+      if (cancelled) return;
+      if (res.success) {
+        setScores(res.data.scores);
+        setIssues(res.data.issues);
+      }
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, run?.status]);
 
-  const scores = output.scores ?? {
-    accuracy: 88,
-    completeness: 92,
-    logic: 86,
-    timeliness: 80,
-  };
+  async function resolveIssue(issueId: string) {
+    setMsg("");
+    const res = await api<{
+      scores: Record<string, number>;
+      issues: QualityIssue[];
+    }>(`/api/projects/${projectId}/quality-check`, {
+      method: "PATCH",
+      body: JSON.stringify({ issueId, status: "RESOLVED" }),
+    });
+    if (!res.success) {
+      setMsg(res.error.message);
+      return;
+    }
+    setScores(res.data.scores);
+    setIssues(res.data.issues);
+  }
+
+  const displayScores =
+    Object.keys(scores).length > 0
+      ? scores
+      : {
+          accuracy: 88,
+          completeness: 92,
+          logic: 86,
+          timeliness: 80,
+        };
 
   return (
     <WorkspaceShell
@@ -55,6 +84,7 @@ export default function QualityPage() {
         {!run || run.status === "QUEUED" || run.status === "RUNNING" ? (
           <p className="sd-muted">质量检查生成中…</p>
         ) : null}
+        {msg ? <p className="sd-muted">{msg}</p> : null}
         <div
           style={{
             display: "grid",
@@ -62,7 +92,7 @@ export default function QualityPage() {
             gap: 12,
           }}
         >
-          {Object.entries(scores).map(([k, v]) => (
+          {Object.entries(displayScores).map(([k, v]) => (
             <div key={k} className="sd-card" style={{ textAlign: "center" }}>
               <div
                 style={{
@@ -93,19 +123,13 @@ export default function QualityPage() {
               <button
                 className="sd-btn sd-btn-secondary"
                 disabled={issue.status === "RESOLVED"}
-                onClick={() =>
-                  setIssues((prev) =>
-                    prev.map((i) =>
-                      i.id === issue.id ? { ...i, status: "RESOLVED" } : i,
-                    ),
-                  )
-                }
+                onClick={() => void resolveIssue(issue.id)}
               >
                 {issue.status === "RESOLVED" ? "已处理" : "标记为已修改"}
               </button>
             </div>
           ))}
-          {!issues.length ? (
+          {!loading && !issues.length ? (
             <p className="sd-muted">质量报告生成中或暂无问题。</p>
           ) : null}
         </div>
