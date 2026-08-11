@@ -1,58 +1,119 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { useEditor, EditorContent, type Editor } from "@tiptap/react";
+import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useQuery } from "@tanstack/react-query";
 import { WorkspaceShell } from "@/components/workspace/workspace-shell";
+import { CitationDrawer } from "@/components/workspace/citation-drawer";
 import { api } from "@/lib/api-client";
-
-type SaveState = "idle" | "saving" | "saved" | "error";
-
-const SAVE_LABEL: Record<SaveState, string> = {
-  idle: "",
-  saving: "正在保存…",
-  saved: "已自动保存",
-  error: "保存失败，正在重试",
-};
+import { useProject } from "@/hooks/use-project";
+import type { QualityIssue } from "@/lib/quality";
 
 export default function ReportPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
+  const project = useProject(projectId);
   const [suggest, setSuggest] = useState("");
-  const [exporting, setExporting] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [exporting, setExporting] = useState<"PDF" | "PPTX" | null>(null);
   const [exportMsg, setExportMsg] = useState("");
-  const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [version, setVersion] = useState<number | null>(null);
-  const artifactIdRef = useRef<string | null>(null);
-  const loadedRef = useRef(false);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saveMsg, setSaveMsg] = useState("");
+  const [citationsOpen, setCitationsOpen] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [forceConfirm, setForceConfirm] = useState<{
+    format: "PDF" | "PPTX";
+    issues: QualityIssue[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (project.data?.success) setDraftTitle(project.data.data.title);
+  }, [project.data]);
 
   const artifacts = useQuery({
     queryKey: ["artifacts", projectId],
     queryFn: async () =>
       api<{
         paid: boolean;
-        canExportPdf: boolean;
-        canExportPptx: boolean;
         artifacts: Array<{
           publicId: string;
           type: string;
-          content: { blocks?: Array<{ type: string; text?: string; level?: number }> } | null;
-          previewOnly?: boolean;
+          content: {
+            blocks?: Array<{ type: string; text?: string; level?: number }>;
+          } | null;
         }>;
       }>(`/api/projects/${projectId}/artifacts`),
     refetchInterval: 3000,
+  });
+
+  const entitlements = useQuery({
+    queryKey: ["entitlements"],
+    queryFn: async () =>
+      api<{
+        entitlements: Array<{
+          type: string;
+          remaining: number;
+          projectId: string | null;
+        }>;
+      }>("/api/entitlements"),
+  });
+
+  const citations = useQuery({
+    queryKey: ["citations", projectId],
+    queryFn: async () =>
+      api<{
+        citations: Array<{
+          publicId: string;
+          quote: string | null;
+          source: {
+            title: string;
+            publisher: string | null;
+            url: string | null;
+            credibility: string;
+            summary: string | null;
+          };
+        }>;
+      }>(`/api/projects/${projectId}/citations`),
   });
 
   const report = artifacts.data?.success
     ? artifacts.data.data.artifacts.find((a) => a.type === "ONLINE_REPORT")
     : undefined;
   const paid = artifacts.data?.success ? artifacts.data.data.paid : false;
-  const canExportPptx = artifacts.data?.success
-    ? artifacts.data.data.canExportPptx
-    : false;
+
+  const artifactDetail = useQuery({
+    queryKey: ["artifact", report?.publicId],
+    queryFn: async () =>
+      api<{
+        version: number;
+        versionsCount: number;
+        content: {
+          blocks?: Array<{ type: string; text?: string; level?: number }>;
+        } | null;
+      }>(`/api/artifacts/${report!.publicId}`),
+    enabled: Boolean(report?.publicId && paid),
+  });
+  const version =
+    artifactDetail.data?.success ? artifactDetail.data.data.version : 0;
+  const citationList =
+    citations.data?.success ? citations.data.data.citations : [];
+  const canPpt =
+    entitlements.data?.success &&
+    entitlements.data.data.entitlements.some(
+      (e) =>
+        e.type === "PPT_EXPORT" &&
+        e.remaining > 0 &&
+        e.projectId === projectId,
+    );
+  const canReportRegenerate =
+    entitlements.data?.success &&
+    entitlements.data.data.entitlements.some(
+      (e) =>
+        e.type === "REPORT_REGENERATE" &&
+        e.remaining > 0 &&
+        e.projectId === projectId,
+    );
 
   useEffect(() => {
     if (artifacts.data?.success && !paid) {
@@ -60,213 +121,242 @@ export default function ReportPage() {
     }
   }, [artifacts.data, paid, projectId, router]);
 
-  useEffect(() => {
-    if (report?.publicId) artifactIdRef.current = report.publicId;
-  }, [report?.publicId]);
-
   const initialText =
     report?.content?.blocks
       ?.map((b) => b.text)
       .filter(Boolean)
       .join("\n\n") ?? "完整报告生成中…";
 
-  // Serialize the editor into the report Block JSON (§28) and autosave it as
-  // the working USER artifact version (§32).
-  const save = useCallback(async (ed: Editor) => {
-    const id = artifactIdRef.current;
-    if (!id) return;
-    const doc = ed.getJSON();
-    const nodes = (doc.content ?? []) as Array<{
-      type?: string;
-      attrs?: { level?: number };
-      content?: Array<{ text?: string }>;
-    }>;
-    const blocks = nodes
-      .map((node, i) => {
-        const text = (node.content ?? []).map((c) => c.text ?? "").join("");
-        return node.type === "heading"
-          ? { id: `b${i}`, type: "heading", level: node.attrs?.level ?? 1, text }
-          : { id: `b${i}`, type: "paragraph", text };
-      })
-      .filter((b) => b.text.length > 0);
-    setSaveState("saving");
-    const res = await api<{ version: number }>(`/api/artifacts/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ content: { type: "document", blocks } }),
-    });
-    if (res.success) {
-      setSaveState("saved");
-      setVersion(res.data.version);
-    } else {
-      setSaveState("error");
-    }
-  }, []);
-
-  const scheduleSave = useCallback(
-    (ed: Editor) => {
-      setSaveState("saving");
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => void save(ed), 1200);
-    },
-    [save],
-  );
-
   const editor = useEditor({
     extensions: [StarterKit],
     content: `<p>${initialText.replace(/\n\n/g, "</p><p>")}</p>`,
     immediatelyRender: false,
-    onUpdate: ({ editor: ed }) => {
-      if (loadedRef.current) scheduleSave(ed);
-    },
-    onBlur: ({ editor: ed }) => {
-      if (!loadedRef.current) return;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      void save(ed);
-    },
   });
 
-  // Load the persisted content once (avoid clobbering edits on each refetch).
   useEffect(() => {
-    if (editor && !loadedRef.current && report?.content?.blocks?.length) {
+    if (editor && report?.content?.blocks?.length) {
       editor.commands.setContent(
         `<p>${initialText.replace(/\n\n/g, "</p><p>")}</p>`,
       );
-      loadedRef.current = true;
     }
   }, [editor, initialText, report?.content?.blocks?.length]);
 
-  function applySuggest() {
-    if (!editor || !suggest) return;
-    editor.chain().focus().insertContent(`<p>${suggest}</p>`).run();
-    setSuggest("");
-    scheduleSave(editor);
-  }
-
-  async function runExport(format: "PDF" | "PPTX") {
-    setExporting(true);
-    setExportMsg(`正在生成 ${format}…`);
-    try {
-      const created = await api<{ publicId: string }>(
-        `/api/projects/${projectId}/exports`,
-        { method: "POST", body: JSON.stringify({ format }) },
-      );
-      if (!created.success) {
-        setExporting(false);
-        setExportMsg(created.error.message);
-        return;
-      }
-      const exportId = created.data.publicId;
-      // Poll the export status until COMPLETED (real async export pipeline).
-      for (let attempt = 0; attempt < 30; attempt++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        const status = await api<{ status: string; downloadUrl: string | null }>(
-          `/api/exports/${exportId}`,
-        );
-        if (status.success && status.data.status === "COMPLETED") {
-          setExporting(false);
-          setExportMsg("导出完成（演示样例）");
-          if (status.data.downloadUrl) {
-            window.open(status.data.downloadUrl, "_blank");
-          }
-          void exportsQuery.refetch();
-          return;
-        }
-        if (status.success && status.data.status === "FAILED") {
-          setExporting(false);
-          setExportMsg("导出失败，请重试");
-          return;
-        }
-      }
-      setExporting(false);
-      setExportMsg("导出仍在后台进行，可稍后在导出记录中查看");
-    } catch {
-      setExporting(false);
-      setExportMsg("导出失败，请重试");
+  async function persistContent() {
+    if (!report || !editor) return;
+    const text = editor.getText();
+    setSaveMsg("正在保存正文…");
+    const res = await api<{ version: number }>(
+      `/api/artifacts/${report.publicId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          expectedVersion: version,
+          content: {
+            type: "document",
+            blocks: text
+              .split(/\n+/)
+              .filter(Boolean)
+              .map((t, i) => ({
+                id: `b_${i + 1}`,
+                type: "paragraph",
+                text: t,
+              })),
+          },
+        }),
+      },
+    );
+    if (res.success) {
+      setSaveMsg("正文已保存");
+      await Promise.all([artifacts.refetch(), artifactDetail.refetch()]);
+    } else if (res.error.code === "ARTIFACT_VERSION_CONFLICT") {
+      setSaveMsg("版本冲突，请刷新页面后重试");
+    } else {
+      setSaveMsg(res.error.message);
     }
   }
 
-  const exportsQuery = useQuery({
-    queryKey: ["exports", projectId],
-    enabled: paid,
-    queryFn: async () =>
-      api<{
-        exports: Array<{
-          publicId: string;
-          format: string;
-          status: string;
-          downloadUrl: string | null;
-          createdAt: string;
-        }>;
-      }>(`/api/projects/${projectId}/exports`),
-  });
+  async function adoptSuggest() {
+    if (!editor || !suggest) return;
+    editor.chain().focus().insertContent(`<p>${suggest}</p>`).run();
+    setSuggest("");
+    await persistContent();
+  }
+
+  async function reportRegenerate() {
+    setRegenerating(true);
+    setExportMsg("");
+    const res = await api<{ remaining: number; agentRunId?: string }>(
+      "/api/entitlements/consume",
+      {
+        method: "POST",
+        body: JSON.stringify({ projectId, type: "REPORT_REGENERATE" }),
+      },
+    );
+    setRegenerating(false);
+    if (!res.success) {
+      setExportMsg(res.error.message);
+      return;
+    }
+    setExportMsg("已重新触发生成完整报告");
+    await Promise.all([artifacts.refetch(), entitlements.refetch()]);
+  }
+
+  async function pollExport(exportId: string) {
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 800));
+      const st = await api<{
+        status: string;
+        downloadUrl: string | null;
+      }>(`/api/exports/${exportId}`);
+      if (!st.success) continue;
+      if (st.data.status === "COMPLETED" && st.data.downloadUrl) {
+        setExporting(null);
+        setExportMsg("导出完成");
+        window.open(st.data.downloadUrl, "_blank");
+        return;
+      }
+      if (st.data.status === "FAILED") {
+        setExporting(null);
+        setExportMsg("导出失败，请重试");
+        return;
+      }
+    }
+    setExporting(null);
+    setExportMsg("导出超时，请稍后重试");
+  }
+
+  async function exportFile(format: "PDF" | "PPTX", force = false) {
+    if (!report) return;
+    setExporting(format);
+    setExportMsg(`正在生成 ${format}…`);
+    setForceConfirm(null);
+    const created = await api<{ exportPublicId: string }>(
+      `/api/artifacts/${report.publicId}/exports`,
+      {
+        method: "POST",
+        body: JSON.stringify({ format, force }),
+      },
+    );
+    if (!created.success) {
+      setExporting(null);
+      if (created.error.code === "QUALITY_WARNING") {
+        const details = created.error.details as
+          | { issues?: QualityIssue[] }
+          | undefined;
+        setForceConfirm({
+          format,
+          issues: details?.issues ?? [],
+        });
+        setExportMsg(created.error.message);
+        return;
+      }
+      setExportMsg(created.error.message);
+      return;
+    }
+
+    await pollExport(created.data.exportPublicId);
+  }
 
   return (
     <WorkspaceShell
       projectId={projectId}
-      mentor={
-        <div>
-          <p>选中内容后可让 AI 给出建议，采用后才写入正文。</p>
-          <button
-            className="sd-btn sd-btn-secondary"
-            style={{ width: "100%", marginBottom: 8 }}
-            onClick={() => setSuggest("建议改写：将结论表述得更克制，并补充来源限定语。")}
-          >
-            改写选中内容
-          </button>
-          <button
-            className="sd-btn sd-btn-secondary"
-            style={{ width: "100%", marginBottom: 8 }}
-            onClick={() => setSuggest("建议缩短：保留核心差异与一条行动建议。")}
-          >
-            缩短
-          </button>
-          {suggest ? (
-            <div className="sd-card" style={{ marginTop: 8 }}>
-              <div className="sd-muted">AI 建议</div>
-              <p>{suggest}</p>
-              <button className="sd-btn" onClick={applySuggest}>
-                采用
-              </button>
-            </div>
-          ) : null}
-        </div>
-      }
+      draftTitle={draftTitle}
+      onRemoteTitle={(title) => setDraftTitle(title)}
+      mentor={<p>选中内容后可让 AI 给出建议，采用后才写入正文。</p>}
+      onMentorSuggestion={(suggestion) => setSuggest(suggestion ?? "")}
+      getSelection={() => {
+        if (!editor) return "";
+        const { from, to } = editor.state.selection;
+        if (from === to) return "";
+        return editor.state.doc.textBetween(from, to, "\n");
+      }}
     >
       <div className="sd-card">
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <h1 style={{ marginTop: 0, marginBottom: 4 }}>成果编辑</h1>
-            <div className="sd-muted" style={{ fontSize: 13 }} data-testid="save-status">
-              {SAVE_LABEL[saveState]}
-              {version ? `${saveState !== "idle" ? " · " : ""}版本 v${version}` : ""}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <h1 style={{ marginTop: 0 }}>成果编辑</h1>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
-              className="sd-btn"
-              onClick={() => runExport("PDF")}
-              disabled={exporting}
-              data-testid="export-pdf"
+              className="sd-btn sd-btn-secondary"
+              data-testid="open-citations"
+              onClick={() => setCitationsOpen(true)}
             >
-              {exporting ? "导出中…" : "导出 PDF"}
+              来源
             </button>
-            {canExportPptx ? (
+            {canReportRegenerate ? (
               <button
                 className="sd-btn sd-btn-secondary"
-                onClick={() => runExport("PPTX")}
-                disabled={exporting}
-                data-testid="export-pptx"
+                data-testid="report-regenerate"
+                disabled={regenerating || Boolean(exporting)}
+                onClick={reportRegenerate}
               >
-                导出 PPT
+                {regenerating ? "重跑中…" : "重新生成报告"}
               </button>
             ) : (
-              <span className="sd-chip" title="PPT 导出需专业项目权益">
-                PPT · 专业
-              </span>
+              <button
+                className="sd-btn sd-btn-secondary"
+                data-testid="report-regenerate"
+                disabled
+                title="需专业版重试"
+              >
+                需专业版重试
+              </button>
+            )}
+            <button className="sd-btn sd-btn-secondary" onClick={persistContent}>
+              保存正文
+            </button>
+            <button
+              className="sd-btn"
+              onClick={() => exportFile("PDF")}
+              disabled={Boolean(exporting) || !report}
+              data-testid="export-pdf"
+            >
+              {exporting === "PDF" ? "导出中…" : "导出 PDF"}
+            </button>
+            {canPpt ? (
+              <button
+                className="sd-btn sd-btn-secondary"
+                onClick={() => exportFile("PPTX")}
+                disabled={Boolean(exporting) || !report}
+                data-testid="export-ppt"
+              >
+                {exporting === "PPTX" ? "导出中…" : "导出 PPT"}
+              </button>
+            ) : (
+              <button
+                className="sd-btn sd-btn-secondary"
+                disabled
+                title="专业项目权益可导出 PPT"
+                data-testid="export-ppt-locked"
+              >
+                导出 PPT（需专业版）
+              </button>
             )}
           </div>
         </div>
+
+        <label className="sd-label">项目名称</label>
+        <input
+          className="sd-input"
+          value={draftTitle}
+          onChange={(e) => setDraftTitle(e.target.value)}
+          style={{ marginBottom: 12 }}
+        />
+
         {exportMsg ? <p className="sd-muted">{exportMsg}</p> : null}
+        {saveMsg ? <p className="sd-muted">{saveMsg}</p> : null}
+        {report ? (
+          <p className="sd-muted" data-testid="report-version">
+            版本 v{version}
+          </p>
+        ) : null}
+
         <div
           style={{
             border: "1px solid var(--sd-border)",
@@ -278,40 +368,62 @@ export default function ReportPage() {
         >
           <EditorContent editor={editor} />
         </div>
-      </div>
 
-      {exportsQuery.data?.success && exportsQuery.data.data.exports.length ? (
-        <div className="sd-card" style={{ marginTop: 12 }}>
-          <h3 style={{ marginTop: 0 }}>导出记录</h3>
-          <div style={{ display: "grid", gap: 8 }}>
-            {exportsQuery.data.data.exports.map((e) => (
-              <div
-                key={e.publicId}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 12,
-                  alignItems: "center",
+        {suggest ? (
+          <div className="sd-card" style={{ marginTop: 12 }}>
+            <div className="sd-muted">AI 建议</div>
+            <p>{suggest}</p>
+            <button className="sd-btn" onClick={() => void adoptSuggest()}>
+              采用
+            </button>
+          </div>
+        ) : null}
+      </div>
+      <CitationDrawer
+        open={citationsOpen}
+        onClose={() => setCitationsOpen(false)}
+        citations={citationList}
+      />
+      {forceConfirm ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.4)",
+            zIndex: 60,
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+          }}
+        >
+          <div className="sd-card" style={{ maxWidth: 440, width: "100%" }}>
+            <h3 style={{ marginTop: 0 }}>存在未处理的质量问题</h3>
+            <p className="sd-muted">确认后可强制导出，系统会记录强制导出决策。</p>
+            <ul style={{ paddingLeft: 18, margin: "12px 0" }}>
+              {forceConfirm.issues.map((issue) => (
+                <li key={issue.id}>
+                  [{issue.severity}] {issue.message}
+                </li>
+              ))}
+            </ul>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="sd-btn"
+                data-testid="export-force-confirm"
+                onClick={() => void exportFile(forceConfirm.format, true)}
+              >
+                仍要强制导出
+              </button>
+              <button
+                className="sd-btn sd-btn-secondary"
+                onClick={() => {
+                  setForceConfirm(null);
+                  setExportMsg("");
                 }}
               >
-                <span>
-                  <span className="sd-chip">{e.format}</span>{" "}
-                  <span className="sd-muted">{e.status}</span>
-                </span>
-                {e.downloadUrl ? (
-                  <a
-                    className="sd-btn sd-btn-secondary"
-                    href={e.downloadUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    下载
-                  </a>
-                ) : (
-                  <span className="sd-muted">处理中…</span>
-                )}
-              </div>
-            ))}
+                取消
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

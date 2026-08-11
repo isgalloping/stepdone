@@ -28,15 +28,24 @@ export async function enqueueNode(args: {
     where: { id: args.projectId },
   });
 
-  assertCanStartNode({
-    projectStatus: project.status as never,
-    previousStepStatus: (previous?.status as StepStatus | undefined) ?? null,
-    node,
-    hasPaidEntitlement: await userHasPaidEntitlement(
-      args.userId,
-      args.projectId,
-    ),
-  });
+  // Retries bump inputVersion (FAILED_RETRYABLE or PRO entitlement reruns).
+  const isRetry = (args.inputVersion ?? 1) > 1;
+  if (!isRetry) {
+    assertCanStartNode({
+      projectStatus: project.status as never,
+      previousStepStatus: (previous?.status as StepStatus | undefined) ?? null,
+      node,
+      hasPaidEntitlement: await userHasPaidEntitlement(
+        args.userId,
+        args.projectId,
+      ),
+    });
+  } else if (node.requiresPayment) {
+    const paid = await userHasPaidEntitlement(args.userId, args.projectId);
+    if (!paid) {
+      throw new Error("ENTITLEMENT_REQUIRED: paid entitlement required");
+    }
+  }
 
   const inputVersion = args.inputVersion ?? 1;
 

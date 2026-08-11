@@ -79,7 +79,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
   }
 }
 
-// Soft delete: keep the row for 30 days (回收站) so it can be restored.
+/** Soft delete: keep the row for 30 days (回收站) so it can be restored. */
 export async function DELETE(_request: Request, ctx: Ctx) {
   try {
     const user = await requireUser();

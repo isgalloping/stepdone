@@ -19,6 +19,8 @@ export default function CompetitorsPage() {
   const steps = useProjectSteps(projectId);
   const router = useRouter();
   const [selected, setSelected] = useState<string[]>([]);
+  const [customCompetitors, setCustomCompetitors] = useState<string[]>([]);
+  const [customName, setCustomName] = useState("");
   const [loading, setLoading] = useState(false);
 
   const run = steps.data?.success
@@ -33,13 +35,26 @@ export default function CompetitorsPage() {
     }
   }, [list, selected.length]);
 
+  const totalSelected = selected.length + customCompetitors.length;
+
+  function addCustomCompetitor() {
+    const name = customName.trim();
+    if (!name) return;
+    if (selected.includes(name) || customCompetitors.includes(name)) return;
+    setCustomCompetitors((prev) => [...prev, name]);
+    setCustomName("");
+  }
+
   async function confirm() {
     setLoading(true);
     const res = await api(`/api/projects/${projectId}/steps/SELECT_COMPETITORS/decision`, {
       method: "POST",
       body: JSON.stringify({
         action: "CONFIRM_COMPETITORS",
-        payload: { names: selected },
+        payload: {
+          selectedCompetitorIds: selected,
+          customCompetitors,
+        },
       }),
     });
     setLoading(false);
@@ -79,14 +94,56 @@ export default function CompetitorsPage() {
                 );
               })}
             </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <input
+                className="sd-input"
+                data-testid="custom-competitor"
+                placeholder="自定义竞品名称"
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addCustomCompetitor();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="sd-btn sd-btn-secondary"
+                data-testid="add-competitor"
+                disabled={!customName.trim()}
+                onClick={addCustomCompetitor}
+              >
+                添加竞品
+              </button>
+            </div>
+            {customCompetitors.length > 0 ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+                {customCompetitors.map((name) => (
+                  <span key={name} className="sd-chip">
+                    {name}
+                    <button
+                      type="button"
+                      style={{ marginLeft: 6, border: "none", background: "none", cursor: "pointer" }}
+                      onClick={() =>
+                        setCustomCompetitors((prev) => prev.filter((n) => n !== name))
+                      }
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <button
               className="sd-btn"
               style={{ marginTop: 16, width: "100%" }}
-              disabled={loading || selected.length < 3 || selected.length > 8}
+              disabled={loading || totalSelected < 3 || totalSelected > 8}
               onClick={confirm}
               data-testid="confirm-competitors"
             >
-              确认这组竞品（{selected.length}）
+              确认这组竞品（{totalSelected}）
             </button>
           </>
         )}

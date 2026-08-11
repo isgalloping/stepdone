@@ -11,7 +11,7 @@ export async function GET(_request: Request, ctx: Ctx) {
     const { orderId } = await ctx.params;
     const order = await prisma.order.findFirst({
       where: { publicId: orderId, userId: user.id },
-      include: { product: true, project: true },
+      include: { product: true },
     });
     if (!order) {
       return jsonErr(ErrorCodes.PROJECT_NOT_FOUND, "订单不存在", 404);
@@ -21,10 +21,6 @@ export async function GET(_request: Request, ctx: Ctx) {
       status: order.status,
       amountFen: order.amountFen,
       productCode: order.product.code,
-      productName: order.product.name,
-      projectPublicId: order.project.publicId,
-      projectTitle: order.project.title,
-      createdAt: order.createdAt.toISOString(),
       paidAt: order.paidAt?.toISOString() ?? null,
     });
   } catch (error) {

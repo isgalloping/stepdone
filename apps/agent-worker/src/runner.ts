@@ -4,8 +4,13 @@ import { acquireLease, heartbeatLease } from "@stepdone/agent-core";
 import type { NodeCode } from "@stepdone/domain";
 import IORedis from "ioredis";
 import { runFixture } from "./fixtures/index";
-import type { AgentJob } from "./queues";
+import type { AgentJob, WorkerJob } from "./queues";
 import { buildIdempotencyKey } from "@stepdone/agent-core";
+import { handleExportJob } from "./export-runner";
+import {
+  aggregateParticipation,
+  scoresFromParticipation,
+} from "./ability-aggregate";
 
 const workerId = `worker_${process.pid}`;
 const redis = new IORedis(process.env.REDIS_URL ?? "redis://127.0.0.1:6379", {
@@ -59,6 +64,14 @@ async function enqueueFollowUp(
   });
 }
 
+export async function handleWorkerJob(job: Job<WorkerJob>) {
+  if (job.data.kind === "export" || "exportPublicId" in job.data) {
+    await handleExportJob(job as Job<import("./queues").ExportJob>);
+    return;
+  }
+  await handleAgentJob(job as Job<AgentJob>);
+}
+
 export async function handleAgentJob(job: Job<AgentJob>) {
   const data = job.data;
   const agentRun = await prisma.agentRun.findUnique({
@@ -66,7 +79,14 @@ export async function handleAgentJob(job: Job<AgentJob>) {
     include: { project: true, stepRun: true },
   });
   if (!agentRun) return;
-  if (agentRun.status === "SUCCEEDED" || agentRun.status === "CANCELLED") return;
+  if (
+    agentRun.status === "SUCCEEDED" ||
+    agentRun.status === "CANCELLED" ||
+    agentRun.status === "FAILED_RETRYABLE" ||
+    agentRun.status === "FAILED_FINAL"
+  ) {
+    return;
+  }
 
   const ok = await acquireLease(prisma, agentRun.id, workerId);
   if (!ok) {
@@ -148,15 +168,96 @@ export async function handleAgentJob(job: Job<AgentJob>) {
     }
 
     if (result.type !== "completed") {
-      await prisma.agentRun.update({
-        where: { id: agentRun.id },
-        data: {
-          status: "FAILED_RETRYABLE",
-          errorMessage: result.type === "failed" ? result.message : result.reason,
-          lockedBy: null,
-        },
+      const message =
+        result.type === "failed" ? result.message : result.reason;
+      await prisma.$transaction(async (tx) => {
+        await tx.agentRun.update({
+          where: { id: agentRun.id },
+          data: {
+            status: "FAILED_RETRYABLE",
+            errorMessage: message,
+            lockedBy: null,
+            lockExpiresAt: null,
+          },
+        });
+        if (agentRun.stepRunId) {
+          await tx.projectStepRun.update({
+            where: { id: agentRun.stepRunId },
+            data: {
+              status: "FAILED_RETRYABLE",
+              output: { error: message },
+            },
+          });
+        }
+        await tx.project.update({
+          where: { id: agentRun.projectId },
+          data: {
+            status: "FAILED",
+            currentStepCode: data.nodeCode,
+          },
+        });
+        const event = await tx.projectEvent.create({
+          data: {
+            publicId: newPublicId(),
+            projectId: agentRun.projectId,
+            agentRunId: agentRun.id,
+            type: "FAILED",
+            stage: data.nodeCode,
+            message: `步骤失败，可重试：${message}`,
+            percent: 0,
+          },
+        });
+        await publish(agentRun.project.publicId, {
+          id: event.publicId,
+          type: event.type,
+          stage: event.stage,
+          message: event.message,
+          percent: event.percent,
+        });
       });
       return;
+    }
+
+    let finalOutput = result.output as Record<string, unknown>;
+    if (data.nodeCode === "ABILITY_REPORT") {
+      const projectId = agentRun.projectId;
+      const [mentorAnswers, judgments, userVersions, userSources] =
+        await Promise.all([
+          prisma.projectDecision.count({
+            where: { projectId, action: "MENTOR_ANSWER" },
+          }),
+          prisma.projectDecision.count({
+            where: {
+              projectId,
+              action: { in: ["SUBMIT_JUDGMENTS", "CONFIRM_JUDGMENT"] },
+            },
+          }),
+          prisma.artifactVersion.count({
+            where: { createdBy: "USER", artifact: { projectId } },
+          }),
+          prisma.source.count({
+            where: { projectId, publisher: "用户添加" },
+          }),
+        ]);
+      const participation = aggregateParticipation({
+        mentorAnswers,
+        judgments,
+        userVersions,
+        userSources,
+      });
+      const skills = scoresFromParticipation(participation);
+      const fixtureNarrative =
+        typeof result.output === "object" &&
+        result.output &&
+        "narrative" in result.output &&
+        typeof (result.output as { narrative?: unknown }).narrative === "string"
+          ? (result.output as { narrative: string }).narrative
+          : "你在本次项目中保持了主动参与，建议下次先独立列出候选竞品再对照 AI 建议。";
+      finalOutput = {
+        participation,
+        skills,
+        narrative: fixtureNarrative,
+      };
     }
 
     await prisma.$transaction(async (tx) => {
@@ -174,7 +275,7 @@ export async function handleAgentJob(job: Job<AgentJob>) {
           where: { id: agentRun.stepRunId },
           data: {
             status: "SUCCEEDED",
-            output: result.output as object,
+            output: finalOutput as object,
             completedAt: new Date(),
           },
         });
@@ -206,7 +307,7 @@ export async function handleAgentJob(job: Job<AgentJob>) {
           }>;
         };
         for (const s of output.sources) {
-          await tx.source.create({
+          const created = await tx.source.create({
             data: {
               publicId: newPublicId(),
               projectId: agentRun.projectId,
@@ -216,6 +317,13 @@ export async function handleAgentJob(job: Job<AgentJob>) {
               credibility: s.credibility,
               summary: s.summary,
               status: "VERIFIED",
+            },
+          });
+          await tx.citation.create({
+            data: {
+              publicId: newPublicId(),
+              sourceId: created.id,
+              quote: s.summary ?? s.title,
             },
           });
         }
@@ -275,12 +383,38 @@ export async function handleAgentJob(job: Job<AgentJob>) {
             createdBy: "AI",
           },
         });
+        await tx.citation.updateMany({
+          where: { source: { projectId: agentRun.projectId }, artifactId: null },
+          data: { artifactId: artifact.id },
+        });
         await tx.project.update({
           where: { id: agentRun.projectId },
           data: {
             status: "ACTIVE",
             currentStepCode: "QUALITY_REVIEW",
             progress: 90,
+          },
+        });
+      } else if (data.nodeCode === "QUALITY_REVIEW") {
+        const output = result.output as {
+          issues?: Array<Record<string, unknown>>;
+          scores?: Record<string, number>;
+        };
+        const prev = (agentRun.project.metadata ?? {}) as Record<string, unknown>;
+        const qualityMeta = {
+          ...prev,
+          qualityCheck: {
+            scores: output.scores ?? {},
+            issues: output.issues ?? [],
+          },
+        };
+        await tx.project.update({
+          where: { id: agentRun.projectId },
+          data: {
+            status: "ACTIVE",
+            currentStepCode: "QUALITY_REVIEW",
+            progress: 95,
+            metadata: JSON.parse(JSON.stringify(qualityMeta)),
           },
         });
       } else if (data.nodeCode === "BUILD_MATRIX") {
@@ -290,6 +424,41 @@ export async function handleAgentJob(job: Job<AgentJob>) {
             status: "AI_PROCESSING",
             currentStepCode: "USER_JUDGMENT",
             progress: 65,
+          },
+        });
+      } else if (data.nodeCode === "ABILITY_REPORT") {
+        const skills = (finalOutput.skills ?? {}) as Record<string, number>;
+        const participation = finalOutput.participation ?? {};
+        const dimensions = await tx.skillDimension.findMany();
+        for (const dim of dimensions) {
+          const score = skills[dim.name];
+          if (typeof score !== "number") continue;
+          await tx.skillAssessment.upsert({
+            where: {
+              projectId_dimensionId: {
+                projectId: agentRun.projectId,
+                dimensionId: dim.id,
+              },
+            },
+            create: {
+              publicId: newPublicId(),
+              projectId: agentRun.projectId,
+              dimensionId: dim.id,
+              score,
+              evidence: { participation },
+            },
+            update: {
+              score,
+              evidence: { participation },
+            },
+          });
+        }
+        await tx.project.update({
+          where: { id: agentRun.projectId },
+          data: {
+            status: "ACTIVE",
+            currentStepCode: "ABILITY_REPORT",
+            progress: 100,
           },
         });
       } else {
@@ -343,6 +512,55 @@ export async function handleAgentJob(job: Job<AgentJob>) {
         "ABILITY_REPORT",
       );
     }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "未知错误";
+    await prisma.$transaction(async (tx) => {
+      await tx.agentRun.update({
+        where: { id: agentRun.id },
+        data: {
+          status: "FAILED_RETRYABLE",
+          errorMessage: message,
+          lockedBy: null,
+          lockExpiresAt: null,
+        },
+      });
+      if (agentRun.stepRunId) {
+        await tx.projectStepRun.update({
+          where: { id: agentRun.stepRunId },
+          data: {
+            status: "FAILED_RETRYABLE",
+            output: { error: message },
+          },
+        });
+      }
+      await tx.project.update({
+        where: { id: agentRun.projectId },
+        data: {
+          status: "FAILED",
+          currentStepCode: data.nodeCode,
+        },
+      });
+      const event = await tx.projectEvent.create({
+        data: {
+          publicId: newPublicId(),
+          projectId: agentRun.projectId,
+          agentRunId: agentRun.id,
+          type: "FAILED",
+          stage: data.nodeCode,
+          message: `步骤异常，可重试：${message}`,
+          percent: 0,
+        },
+      });
+      await publish(agentRun.project.publicId, {
+        id: event.publicId,
+        type: event.type,
+        stage: event.stage,
+        message: event.message,
+        percent: event.percent,
+      });
+    });
+    console.error("agent job failed", data.agentRunId, message);
   } finally {
     clearInterval(hb);
   }

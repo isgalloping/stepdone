@@ -117,11 +117,7 @@ export async function userHasPaidEntitlement(
   return count > 0;
 }
 
-/**
- * Capability check for a specific entitlement type on a project (e.g.
- * REPORT_EXPORT / PPT_EXPORT). Presence — not decrement — gates re-usable
- * capabilities within a paid project.
- */
+/** Presence check for a project entitlement type (e.g. REPORT_EXPORT / PPT_EXPORT). */
 export async function userHasEntitlement(
   userId: bigint,
   projectId: bigint,

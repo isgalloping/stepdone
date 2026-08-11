@@ -13,11 +13,12 @@ export function jsonErr(
   message: string,
   status = 400,
   retryable = false,
+  details?: unknown,
 ) {
   return NextResponse.json(
     {
       success: false,
-      error: { code, message, retryable },
+      error: { code, message, retryable, ...(details !== undefined ? { details } : {}) },
       requestId: newPublicId(),
     },
     { status },

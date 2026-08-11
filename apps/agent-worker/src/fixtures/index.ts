@@ -328,23 +328,8 @@ export async function runFixture(
           issues: [
             {
               id: "q1",
-              severity: "HIGH",
-              dimension: "accuracy",
-              message: `结论「${target} 的用户规模最大」缺少可靠来源`,
-              status: "OPEN",
-            },
-            {
-              id: "q2",
               severity: "MEDIUM",
-              dimension: "timeliness",
               message: "部分定价信息来源时效性一般",
-              status: "OPEN",
-            },
-            {
-              id: "q3",
-              severity: "LOW",
-              dimension: "expression",
-              message: "个别段落表述可更简洁",
               status: "OPEN",
             },
           ],
@@ -359,6 +344,14 @@ export async function runFixture(
             adopted: 2,
             edited: 1,
             sourcesAdded: 0,
+          },
+          skills: {
+            目标定义: 82,
+            信息检索: 74,
+            事实核查: 76,
+            比较分析: 88,
+            AI协作: 84,
+            结构化表达: 80,
           },
           narrative: "你在范围确认与关键判断上保持了主动，建议下次先独立列出候选竞品。",
         },

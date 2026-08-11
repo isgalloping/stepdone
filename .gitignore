@@ -45,9 +45,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# turbo
-.turbo/
-
 # worktrees
 .worktrees/
 
@@ -55,3 +52,6 @@ next-env.d.ts
 /test-results/
 /playwright-report/
 /blob-report/
+
+# turbo
+.turbo/

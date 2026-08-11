@@ -1,8 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { useProject, useProjectStatus } from "@/hooks/use-project";
+import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useProject,
+  useProjectStatus,
+  useProjectSteps,
+} from "@/hooks/use-project";
+import { useProjectEvents } from "@/hooks/use-project-events";
+import { useAutosave, type AutosaveStatus } from "@/hooks/use-autosave";
+import { SaveIndicator } from "@/components/workspace/save-indicator";
+import { ConflictDialog } from "@/components/workspace/conflict-dialog";
+import { RetryBanner } from "@/components/workspace/retry-banner";
+import { MentorPanel } from "@/components/workspace/mentor-panel";
+import { api } from "@/lib/api-client";
 
 const UI_STEPS = [
   { key: "plan", label: "1 计划", path: "plan" },
@@ -21,16 +34,61 @@ export function WorkspaceShell({
   projectId,
   mentor,
   children,
+  draftTitle,
+  onTitleSaved,
+  onRemoteTitle,
+  getSelection,
+  onMentorSuggestion,
 }: {
   projectId: string;
   mentor?: React.ReactNode;
   children: React.ReactNode;
+  draftTitle?: string;
+  onTitleSaved?: () => void;
+  onRemoteTitle?: (title: string) => void;
+  getSelection?: () => string;
+  onMentorSuggestion?: (suggestion: string | null) => void;
 }) {
+  const queryClient = useQueryClient();
+  const pathname = usePathname();
   const project = useProject(projectId);
   const status = useProjectStatus(projectId);
+  const steps = useProjectSteps(projectId);
+  const { lastEvent, connection } = useProjectEvents(projectId);
   const [openMentor, setOpenMentor] = useState(false);
-  const title = project.data?.success ? project.data.data.title : "项目工作台";
-  const eventMsg = status.data?.success ? status.data.data.latestEvent?.message : "";
+  const mentorStep =
+    pathname.split("/").filter(Boolean).pop() ?? "plan";
+
+  const failedStep =
+    steps.data?.success
+      ? steps.data.data.runs.find((r) => r.status === "FAILED_RETRYABLE")
+      : undefined;
+
+  const title = draftTitle
+    ?? (project.data?.success ? project.data.data.title : "项目工作台");
+  const revision = project.data?.success ? project.data.data.revision : 0;
+  const eventMsg =
+    lastEvent?.message ??
+    (status.data?.success ? status.data.data.latestEvent?.message : "");
+
+  const getChanges = useMemo(
+    () => () => (draftTitle ? { title: draftTitle } : {}),
+    [draftTitle],
+  );
+
+  const autosave = useAutosave(
+    projectId,
+    revision,
+    getChanges,
+    Boolean(draftTitle),
+  );
+
+  useEffect(() => {
+    if (draftTitle) autosave.scheduleSave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftTitle]);
+
+  const saveStatus: AutosaveStatus = draftTitle ? autosave.status : "idle";
 
   return (
     <div style={{ minHeight: "100%" }}>
@@ -57,12 +115,40 @@ export function WorkspaceShell({
               ? `${status.data.data.status} · ${status.data.data.currentStepCode ?? ""}`
               : "加载中…"}
             {eventMsg ? ` · ${eventMsg}` : ""}
+            {" · "}
+            <span data-testid="connection-mode">
+              {connection === "sse" ? "实时" : connection === "polling" ? "轮询" : "重连中"}
+            </span>
+            {" · "}
+            <SaveIndicator status={saveStatus} />
           </div>
         </div>
-        <button className="sd-btn sd-btn-secondary" onClick={() => setOpenMentor(true)}>
-          AI 导师
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {draftTitle ? (
+            <button
+              className="sd-btn sd-btn-secondary"
+              style={{ minHeight: 36 }}
+              onClick={() => {
+                void autosave.saveNow().then((r) => {
+                  if (r?.action === "saved") {
+                    void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+                    onTitleSaved?.();
+                  }
+                });
+              }}
+            >
+              保存
+            </button>
+          ) : null}
+          <button className="sd-btn sd-btn-secondary" onClick={() => setOpenMentor(true)}>
+            AI 导师
+          </button>
+        </div>
       </div>
+
+      {failedStep ? (
+        <RetryBanner projectId={projectId} stepCode={failedStep.nodeCode} />
+      ) : null}
 
       <div
         className="workspace-grid"
@@ -109,9 +195,13 @@ export function WorkspaceShell({
           }}
         >
           <div style={{ fontWeight: 700, marginBottom: 8 }}>AI 项目导师</div>
-          {mentor ?? (
-            <p className="sd-muted">一次只提出一个关键问题，帮你做成可交付成果。</p>
-          )}
+          <MentorPanel
+            projectId={projectId}
+            step={mentorStep}
+            tip={mentor}
+            getSelection={getSelection}
+            onSuggestion={onMentorSuggestion}
+          />
         </aside>
       </div>
 
@@ -133,13 +223,44 @@ export function WorkspaceShell({
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ fontWeight: 700, marginBottom: 8 }}>AI 项目导师</div>
-            {mentor ?? <p className="sd-muted">继续当前步骤中的判断即可。</p>}
-            <button className="sd-btn sd-btn-secondary" style={{ width: "100%" }} onClick={() => setOpenMentor(false)}>
+            <MentorPanel
+              projectId={projectId}
+              step={mentorStep}
+              tip={mentor ?? <p className="sd-muted">继续当前步骤中的判断即可。</p>}
+              getSelection={getSelection}
+              onSuggestion={onMentorSuggestion}
+            />
+            <button
+              className="sd-btn sd-btn-secondary"
+              style={{ width: "100%", marginTop: 12 }}
+              onClick={() => setOpenMentor(false)}
+            >
               关闭
             </button>
           </div>
         </div>
       ) : null}
+
+      <ConflictDialog
+        open={autosave.status === "conflict"}
+        onKeepLocal={() => {
+          void autosave.resolveConflict("local").then(() => {
+            void queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+          });
+        }}
+        onUseRemote={() => {
+          void autosave.resolveConflict("remote").then(async () => {
+            const latest = await api<{ title: string }>(
+              `/api/projects/${projectId}`,
+            );
+            if (latest.success) onRemoteTitle?.(latest.data.title);
+            void queryClient.invalidateQueries({
+              queryKey: ["project", projectId],
+            });
+            onTitleSaved?.();
+          });
+        }}
+      />
 
       <style>{`
         @media (max-width: 1199px) {

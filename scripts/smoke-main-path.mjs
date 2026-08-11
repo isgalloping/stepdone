@@ -182,6 +182,25 @@ async function main() {
     return report?.content ? report : null;
   }, "ONLINE_REPORT", 90_000);
   console.log("REPORT_NODE_OK");
+
+  const cites = await api(`/api/projects/${projectId}/citations`, { cookie });
+  if (!cites.json.success || !Array.isArray(cites.json.data?.citations)) {
+    throw new Error("CITATIONS_API_MISSING");
+  }
+  if (cites.json.data.citations.length < 1) {
+    throw new Error("CITATIONS_EMPTY");
+  }
+  console.log("CITATIONS_OK", cites.json.data.citations.length);
+
+  const quality = await api(`/api/projects/${projectId}/quality-check`, { cookie });
+  if (!quality.json.success) {
+    throw new Error(`QUALITY_API_FAIL: ${JSON.stringify(quality.json)}`);
+  }
+  if (!Array.isArray(quality.json.data?.issues)) {
+    throw new Error("QUALITY_ISSUES_MISSING");
+  }
+  console.log("QUALITY_OK", quality.json.data.issues.length);
+
   console.log("SMOKE_PASS");
 }
 

@@ -3,6 +3,7 @@ import type { NodeCode } from "@stepdone/domain";
 import IORedis from "ioredis";
 
 export type AgentJob = {
+  kind?: "agent";
   agentRunId: string;
   projectId: string;
   stepRunId: string;
@@ -13,9 +14,13 @@ export type AgentJob = {
 export type ExportJob = {
   kind: "export";
   exportPublicId: string;
-  projectId: string;
-  format: string;
+  artifactPublicId: string;
+  projectPublicId: string;
+  format: "PDF" | "PPTX";
+  schemaVersion: 1;
 };
+
+export type WorkerJob = AgentJob | ExportJob;
 
 const connection = () =>
   new IORedis(process.env.REDIS_URL ?? "redis://127.0.0.1:6379", {
@@ -32,15 +37,14 @@ export function createQueues() {
   };
 }
 
-export function createWorkers(handlers: {
-  agent: (job: Job<AgentJob>) => Promise<void>;
-  export: (job: Job<ExportJob>) => Promise<void>;
-}) {
+export function createWorkers(
+  handler: (job: Job<WorkerJob>) => Promise<void>,
+) {
   const conn = connection();
   const opts = { connection: conn, concurrency: 2 };
   return [
-    new Worker<AgentJob>("agent-default", handlers.agent, opts),
-    new Worker<AgentJob>("agent-heavy", handlers.agent, { ...opts, concurrency: 1 }),
-    new Worker<ExportJob>("export", handlers.export, { ...opts, concurrency: 1 }),
+    new Worker<WorkerJob>("agent-default", handler, opts),
+    new Worker<WorkerJob>("agent-heavy", handler, { ...opts, concurrency: 1 }),
+    new Worker<WorkerJob>("export", handler, { ...opts, concurrency: 1 }),
   ];
 }

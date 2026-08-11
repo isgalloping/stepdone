@@ -1,37 +1,8 @@
 import { createOrder } from "@stepdone/payments";
-import { prisma } from "@stepdone/database";
 import { ErrorCodes } from "@stepdone/domain";
 import { jsonOk, jsonErr } from "@/lib/api";
 import { requireUser } from "@/lib/session";
 import { getOwnedProject } from "@/lib/projects";
-
-export async function GET() {
-  try {
-    const user = await requireUser();
-    const orders = await prisma.order.findMany({
-      where: { userId: user.id },
-      include: { product: true, project: true },
-      orderBy: { createdAt: "desc" },
-      take: 50,
-    });
-    return jsonOk({
-      orders: orders.map((o) => ({
-        orderPublicId: o.publicId,
-        status: o.status,
-        amountFen: o.amountFen,
-        productCode: o.product.code,
-        productName: o.product.name,
-        projectPublicId: o.project.publicId,
-        projectTitle: o.project.title,
-        createdAt: o.createdAt.toISOString(),
-        paidAt: o.paidAt?.toISOString() ?? null,
-      })),
-    });
-  } catch (error) {
-    const err = error as { code?: string; status?: number };
-    return jsonErr(err.code ?? "AUTH_REQUIRED", "未登录", err.status ?? 401);
-  }
-}
 
 export async function POST(request: Request) {
   try {

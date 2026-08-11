@@ -101,10 +101,12 @@ export async function POST(request: Request, ctx: Ctx) {
           topic: "export",
           status: "PENDING",
           payload: {
-            type: "EXPORT_ARTIFACT",
+            type: "EXPORT_FILE",
             exportPublicId: exportRow.publicId,
+            artifactPublicId: artifact.publicId,
             projectPublicId: project.publicId,
             format,
+            schemaVersion: 1,
           },
         },
       });
@@ -113,6 +115,7 @@ export async function POST(request: Request, ctx: Ctx) {
 
     return jsonOk({
       publicId: created.publicId,
+      exportPublicId: created.publicId,
       format: created.format,
       status: created.status,
     });
