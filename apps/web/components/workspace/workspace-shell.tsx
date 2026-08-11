@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,6 +14,7 @@ import { useAutosave, type AutosaveStatus } from "@/hooks/use-autosave";
 import { SaveIndicator } from "@/components/workspace/save-indicator";
 import { ConflictDialog } from "@/components/workspace/conflict-dialog";
 import { RetryBanner } from "@/components/workspace/retry-banner";
+import { MentorPanel } from "@/components/workspace/mentor-panel";
 import { api } from "@/lib/api-client";
 
 const UI_STEPS = [
@@ -44,11 +46,14 @@ export function WorkspaceShell({
   onRemoteTitle?: (title: string) => void;
 }) {
   const queryClient = useQueryClient();
+  const pathname = usePathname();
   const project = useProject(projectId);
   const status = useProjectStatus(projectId);
   const steps = useProjectSteps(projectId);
   const { lastEvent, connection } = useProjectEvents(projectId);
   const [openMentor, setOpenMentor] = useState(false);
+  const mentorStep =
+    pathname.split("/").filter(Boolean).pop() ?? "plan";
 
   const failedStep =
     steps.data?.success
@@ -186,9 +191,11 @@ export function WorkspaceShell({
           }}
         >
           <div style={{ fontWeight: 700, marginBottom: 8 }}>AI 项目导师</div>
-          {mentor ?? (
-            <p className="sd-muted">一次只提出一个关键问题，帮你做成可交付成果。</p>
-          )}
+          <MentorPanel
+            projectId={projectId}
+            step={mentorStep}
+            tip={mentor}
+          />
         </aside>
       </div>
 
@@ -210,10 +217,14 @@ export function WorkspaceShell({
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ fontWeight: 700, marginBottom: 8 }}>AI 项目导师</div>
-            {mentor ?? <p className="sd-muted">继续当前步骤中的判断即可。</p>}
+            <MentorPanel
+              projectId={projectId}
+              step={mentorStep}
+              tip={mentor ?? <p className="sd-muted">继续当前步骤中的判断即可。</p>}
+            />
             <button
               className="sd-btn sd-btn-secondary"
-              style={{ width: "100%" }}
+              style={{ width: "100%", marginTop: 12 }}
               onClick={() => setOpenMentor(false)}
             >
               关闭
