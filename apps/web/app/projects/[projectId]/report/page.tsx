@@ -50,9 +50,13 @@ export default function ReportPage() {
   const entitlements = useQuery({
     queryKey: ["entitlements"],
     queryFn: async () =>
-      api<{ entitlements: Array<{ type: string; remaining: number }> }>(
-        "/api/entitlements",
-      ),
+      api<{
+        entitlements: Array<{
+          type: string;
+          remaining: number;
+          projectId: string | null;
+        }>;
+      }>("/api/entitlements"),
   });
 
   const citations = useQuery({
@@ -97,12 +101,18 @@ export default function ReportPage() {
   const canPpt =
     entitlements.data?.success &&
     entitlements.data.data.entitlements.some(
-      (e) => e.type === "PPT_EXPORT" && e.remaining > 0,
+      (e) =>
+        e.type === "PPT_EXPORT" &&
+        e.remaining > 0 &&
+        e.projectId === projectId,
     );
   const canReportRegenerate =
     entitlements.data?.success &&
     entitlements.data.data.entitlements.some(
-      (e) => e.type === "REPORT_REGENERATE" && e.remaining > 0,
+      (e) =>
+        e.type === "REPORT_REGENERATE" &&
+        e.remaining > 0 &&
+        e.projectId === projectId,
     );
 
   useEffect(() => {
@@ -140,6 +150,7 @@ export default function ReportPage() {
       {
         method: "PATCH",
         body: JSON.stringify({
+          expectedVersion: version,
           content: {
             type: "document",
             blocks: text
@@ -157,6 +168,8 @@ export default function ReportPage() {
     if (res.success) {
       setSaveMsg("正文已保存");
       await Promise.all([artifacts.refetch(), artifactDetail.refetch()]);
+    } else if (res.error.code === "ARTIFACT_VERSION_CONFLICT") {
+      setSaveMsg("版本冲突，请刷新页面后重试");
     } else {
       setSaveMsg(res.error.message);
     }
@@ -250,7 +263,13 @@ export default function ReportPage() {
       draftTitle={draftTitle}
       onRemoteTitle={(title) => setDraftTitle(title)}
       mentor={<p>选中内容后可让 AI 给出建议，采用后才写入正文。</p>}
-      onMentorSuggestion={setSuggest}
+      onMentorSuggestion={(suggestion) => setSuggest(suggestion ?? "")}
+      getSelection={() => {
+        if (!editor) return "";
+        const { from, to } = editor.state.selection;
+        if (from === to) return "";
+        return editor.state.doc.textBetween(from, to, "\n");
+      }}
     >
       <div className="sd-card">
         <div

@@ -36,9 +36,13 @@ export default function SourcesPage() {
   const entitlements = useQuery({
     queryKey: ["entitlements"],
     queryFn: async () =>
-      api<{ entitlements: Array<{ type: string; remaining: number }> }>(
-        "/api/entitlements",
-      ),
+      api<{
+        entitlements: Array<{
+          type: string;
+          remaining: number;
+          projectId: string | null;
+        }>;
+      }>("/api/entitlements"),
   });
 
   const research = steps.data?.success
@@ -49,7 +53,10 @@ export default function SourcesPage() {
   const canResearchRetry =
     entitlements.data?.success &&
     entitlements.data.data.entitlements.some(
-      (e) => e.type === "RESEARCH_RETRY" && e.remaining > 0,
+      (e) =>
+        e.type === "RESEARCH_RETRY" &&
+        e.remaining > 0 &&
+        e.projectId === projectId,
     );
 
   async function continueNext() {

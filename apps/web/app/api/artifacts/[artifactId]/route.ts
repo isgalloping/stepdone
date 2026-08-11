@@ -61,7 +61,20 @@ export async function PATCH(request: Request, ctx: Ctx) {
     const body = (await request.json()) as {
       title?: string;
       content?: unknown;
+      expectedVersion?: number;
     };
+
+    const latestVersion = artifact.versions[0]?.version ?? 0;
+    if (
+      body.expectedVersion !== undefined &&
+      body.expectedVersion !== latestVersion
+    ) {
+      return jsonErr(
+        ErrorCodes.ARTIFACT_VERSION_CONFLICT,
+        "成果版本已变更，请刷新后重试",
+        409,
+      );
+    }
 
     if (body.title) {
       await prisma.artifact.update({
@@ -70,7 +83,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
       });
     }
 
-    let version = artifact.versions[0]?.version ?? 0;
+    let version = latestVersion;
     if (body.content !== undefined) {
       version += 1;
       await prisma.artifactVersion.create({
