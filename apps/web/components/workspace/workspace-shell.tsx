@@ -37,6 +37,8 @@ export function WorkspaceShell({
   draftTitle,
   onTitleSaved,
   onRemoteTitle,
+  getSelection,
+  onMentorSuggestion,
 }: {
   projectId: string;
   mentor?: React.ReactNode;
@@ -44,6 +46,8 @@ export function WorkspaceShell({
   draftTitle?: string;
   onTitleSaved?: () => void;
   onRemoteTitle?: (title: string) => void;
+  getSelection?: () => string;
+  onMentorSuggestion?: (suggestion: string | null) => void;
 }) {
   const queryClient = useQueryClient();
   const pathname = usePathname();
@@ -195,6 +199,8 @@ export function WorkspaceShell({
             projectId={projectId}
             step={mentorStep}
             tip={mentor}
+            getSelection={getSelection}
+            onSuggestion={onMentorSuggestion}
           />
         </aside>
       </div>
@@ -221,6 +227,8 @@ export function WorkspaceShell({
               projectId={projectId}
               step={mentorStep}
               tip={mentor ?? <p className="sd-muted">继续当前步骤中的判断即可。</p>}
+              getSelection={getSelection}
+              onSuggestion={onMentorSuggestion}
             />
             <button
               className="sd-btn sd-btn-secondary"

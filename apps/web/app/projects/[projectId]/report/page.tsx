@@ -249,38 +249,8 @@ export default function ReportPage() {
       projectId={projectId}
       draftTitle={draftTitle}
       onRemoteTitle={(title) => setDraftTitle(title)}
-      mentor={
-        <div>
-          <p>选中内容后可让 AI 给出建议，采用后才写入正文。</p>
-          <button
-            className="sd-btn sd-btn-secondary"
-            style={{ width: "100%", marginBottom: 8 }}
-            onClick={() =>
-              setSuggest("建议改写：将结论表述得更克制，并补充来源限定语。")
-            }
-          >
-            改写选中内容
-          </button>
-          <button
-            className="sd-btn sd-btn-secondary"
-            style={{ width: "100%", marginBottom: 8 }}
-            onClick={() =>
-              setSuggest("建议缩短：保留核心差异与一条行动建议。")
-            }
-          >
-            缩短
-          </button>
-          {suggest ? (
-            <div className="sd-card" style={{ marginTop: 8 }}>
-              <div className="sd-muted">AI 建议</div>
-              <p>{suggest}</p>
-              <button className="sd-btn" onClick={() => void adoptSuggest()}>
-                采用
-              </button>
-            </div>
-          ) : null}
-        </div>
-      }
+      mentor={<p>选中内容后可让 AI 给出建议，采用后才写入正文。</p>}
+      onMentorSuggestion={setSuggest}
     >
       <div className="sd-card">
         <div
@@ -379,6 +349,16 @@ export default function ReportPage() {
         >
           <EditorContent editor={editor} />
         </div>
+
+        {suggest ? (
+          <div className="sd-card" style={{ marginTop: 12 }}>
+            <div className="sd-muted">AI 建议</div>
+            <p>{suggest}</p>
+            <button className="sd-btn" onClick={() => void adoptSuggest()}>
+              采用
+            </button>
+          </div>
+        ) : null}
       </div>
       <CitationDrawer
         open={citationsOpen}

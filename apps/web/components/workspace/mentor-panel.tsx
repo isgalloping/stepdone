@@ -24,10 +24,14 @@ export function MentorPanel({
   projectId,
   step,
   tip,
+  getSelection,
+  onSuggestion,
 }: {
   projectId: string;
   step: string;
   tip?: React.ReactNode;
+  getSelection?: () => string;
+  onSuggestion?: (suggestion: string | null) => void;
 }) {
   const validStep = isMentorStepKey(step);
   const mentorStep: MentorStepKey = validStep ? step : "plan";
@@ -61,7 +65,8 @@ export function MentorPanel({
   useEffect(() => {
     void load();
     setSuggestion(null);
-  }, [load]);
+    onSuggestion?.(null);
+  }, [load, onSuggestion]);
 
   async function answer(optionId: string) {
     if (!state.question || answering) return;
@@ -86,15 +91,25 @@ export function MentorPanel({
   async function ask(intent: MentorAskIntent) {
     if (asking) return;
     setAsking(true);
+    setSuggestion(null);
+    onSuggestion?.(null);
+    const selection =
+      getSelection?.() ??
+      (typeof window !== "undefined"
+        ? (window.getSelection()?.toString() ?? "")
+        : "");
     const res = await api<{ suggestion: string }>(
       `/api/projects/${projectId}/mentor/ask`,
       {
         method: "POST",
-        body: JSON.stringify({ intent, step: mentorStep }),
+        body: JSON.stringify({ intent, step: mentorStep, selection }),
       },
     );
     setAsking(false);
-    if (res.success) setSuggestion(res.data.suggestion);
+    if (res.success) {
+      setSuggestion(res.data.suggestion);
+      onSuggestion?.(res.data.suggestion);
+    }
   }
 
   const showAsk = isMentorAskStep(mentorStep);
