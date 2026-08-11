@@ -33,19 +33,40 @@ fi
 # commands (docker:up) and the terminals work without sudo.
 sudo chmod 666 /var/run/docker.sock 2>/dev/null || true
 
-# 2. Bring up infrastructure (idempotent; reuses running containers).
-docker compose -f "$COMPOSE_FILE" up -d
+# 2. Bring up infrastructure and wait for health. Idempotent: reuses running
+#    containers. A prebuilt snapshot can capture the MySQL data volume
+#    mid-write, leaving InnoDB unable to finish crash recovery on restore; if
+#    the DB does not come up healthy, recreate the (ephemeral, reseeded) volumes
+#    once and retry.
+compose_up_and_wait() {
+  docker compose -f "$COMPOSE_FILE" up -d
+  local mysql_health redis_health state
+  for _ in $(seq 1 60); do
+    mysql_health="$(docker inspect --format '{{.State.Health.Status}}' docker-mysql-1 2>/dev/null || echo none)"
+    redis_health="$(docker inspect --format '{{.State.Health.Status}}' docker-redis-1 2>/dev/null || echo none)"
+    if [ "$mysql_health" = "healthy" ] && [ "$redis_health" = "healthy" ]; then
+      echo "cloud-agent-start: mysql=$mysql_health redis=$redis_health"
+      return 0
+    fi
+    state="$(docker inspect --format '{{.State.Status}}' docker-mysql-1 2>/dev/null || echo none)"
+    if [ "$state" = "exited" ] || [ "$state" = "dead" ]; then
+      break
+    fi
+    sleep 2
+  done
+  echo "cloud-agent-start: mysql=$mysql_health redis=$redis_health (not healthy)"
+  return 1
+}
 
-# 3. Wait for both services to report healthy.
-for _ in $(seq 1 60); do
-  mysql_health="$(docker inspect --format '{{.State.Health.Status}}' docker-mysql-1 2>/dev/null || echo none)"
-  redis_health="$(docker inspect --format '{{.State.Health.Status}}' docker-redis-1 2>/dev/null || echo none)"
-  if [ "$mysql_health" = "healthy" ] && [ "$redis_health" = "healthy" ]; then
-    break
-  fi
-  sleep 2
-done
-echo "cloud-agent-start: mysql=$mysql_health redis=$redis_health"
+if ! compose_up_and_wait; then
+  echo "cloud-agent-start: recreating infrastructure volumes and retrying"
+  docker compose -f "$COMPOSE_FILE" down -v || true
+  compose_up_and_wait || {
+    echo "cloud-agent-start: infrastructure failed to become healthy" >&2
+    docker compose -f "$COMPOSE_FILE" logs --tail 40 mysql >&2 || true
+    exit 1
+  }
+fi
 
 # 4. Grant the app user database-level privileges so the documented
 #    `pnpm db:migrate` (prisma migrate dev + shadow database) also works.
