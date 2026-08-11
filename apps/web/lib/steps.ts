@@ -28,9 +28,9 @@ export async function enqueueNode(args: {
     where: { id: args.projectId },
   });
 
-  // Retries bump inputVersion; allow when project is FAILED after a retryable step.
+  // Retries bump inputVersion (FAILED_RETRYABLE or PRO entitlement reruns).
   const isRetry = (args.inputVersion ?? 1) > 1;
-  if (!isRetry || project.status !== "FAILED") {
+  if (!isRetry) {
     assertCanStartNode({
       projectStatus: project.status as never,
       previousStepStatus: (previous?.status as StepStatus | undefined) ?? null,

@@ -12,6 +12,7 @@ export default function SourcesPage() {
   const steps = useProjectSteps(projectId);
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const [error, setError] = useState("");
 
   const sources = useQuery({
@@ -29,11 +30,24 @@ export default function SourcesPage() {
     refetchInterval: 2000,
   });
 
+  const entitlements = useQuery({
+    queryKey: ["entitlements"],
+    queryFn: async () =>
+      api<{ entitlements: Array<{ type: string; remaining: number }> }>(
+        "/api/entitlements",
+      ),
+  });
+
   const research = steps.data?.success
     ? steps.data.data.runs.find((r) => r.nodeCode === "RESEARCH_SOURCES")
     : undefined;
   const done = research?.status === "SUCCEEDED";
   const list = sources.data?.success ? sources.data.data.sources : [];
+  const canResearchRetry =
+    entitlements.data?.success &&
+    entitlements.data.data.entitlements.some(
+      (e) => e.type === "RESEARCH_RETRY" && e.remaining > 0,
+    );
 
   async function continueNext() {
     setLoading(true);
@@ -52,6 +66,29 @@ export default function SourcesPage() {
       setError("网络异常，请重试");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function researchRetry() {
+    setRetrying(true);
+    setError("");
+    try {
+      const res = await api<{ remaining: number; agentRunId?: string }>(
+        "/api/entitlements/consume",
+        {
+          method: "POST",
+          body: JSON.stringify({ projectId, type: "RESEARCH_RETRY" }),
+        },
+      );
+      if (!res.success) {
+        setError(res.error.message);
+        return;
+      }
+      await Promise.all([sources.refetch(), steps.refetch(), entitlements.refetch()]);
+    } catch {
+      setError("网络异常，请重试");
+    } finally {
+      setRetrying(false);
     }
   }
 
@@ -89,15 +126,38 @@ export default function SourcesPage() {
           ))}
         </div>
         {error ? <p style={{ color: "var(--sd-danger)" }}>{error}</p> : null}
-        <button
-          className="sd-btn"
-          style={{ width: "100%", marginTop: 16 }}
-          disabled={!done || loading}
-          onClick={continueNext}
-          data-testid="continue-sources"
-        >
-          {loading ? "提交中…" : "继续"}
-        </button>
+        <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
+          {canResearchRetry ? (
+            <button
+              className="sd-btn sd-btn-secondary"
+              style={{ width: "100%" }}
+              disabled={retrying || loading}
+              onClick={researchRetry}
+              data-testid="research-retry"
+            >
+              {retrying ? "重试中…" : "重新搜集"}
+            </button>
+          ) : (
+            <button
+              className="sd-btn sd-btn-secondary"
+              style={{ width: "100%" }}
+              disabled
+              data-testid="research-retry"
+              title="需专业版重试"
+            >
+              需专业版重试
+            </button>
+          )}
+          <button
+            className="sd-btn"
+            style={{ width: "100%" }}
+            disabled={!done || loading}
+            onClick={continueNext}
+            data-testid="continue-sources"
+          >
+            {loading ? "提交中…" : "继续"}
+          </button>
+        </div>
       </div>
     </WorkspaceShell>
   );

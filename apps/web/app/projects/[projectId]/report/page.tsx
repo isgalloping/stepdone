@@ -20,6 +20,7 @@ export default function ReportPage() {
   const [exportMsg, setExportMsg] = useState("");
   const [saveMsg, setSaveMsg] = useState("");
   const [citationsOpen, setCitationsOpen] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
 
   useEffect(() => {
     if (project.data?.success) setDraftTitle(project.data.data.title);
@@ -78,6 +79,11 @@ export default function ReportPage() {
     entitlements.data.data.entitlements.some(
       (e) => e.type === "PPT_EXPORT" && e.remaining > 0,
     );
+  const canReportRegenerate =
+    entitlements.data?.success &&
+    entitlements.data.data.entitlements.some(
+      (e) => e.type === "REPORT_REGENERATE" && e.remaining > 0,
+    );
 
   useEffect(() => {
     if (artifacts.data?.success && !paid) {
@@ -132,6 +138,25 @@ export default function ReportPage() {
       }),
     });
     setSaveMsg(res.success ? "正文已保存" : res.error.message);
+  }
+
+  async function reportRegenerate() {
+    setRegenerating(true);
+    setExportMsg("");
+    const res = await api<{ remaining: number; agentRunId?: string }>(
+      "/api/entitlements/consume",
+      {
+        method: "POST",
+        body: JSON.stringify({ projectId, type: "REPORT_REGENERATE" }),
+      },
+    );
+    setRegenerating(false);
+    if (!res.success) {
+      setExportMsg(res.error.message);
+      return;
+    }
+    setExportMsg("已重新触发生成完整报告");
+    await Promise.all([artifacts.refetch(), entitlements.refetch()]);
   }
 
   async function exportFile(format: "PDF" | "PPTX") {
@@ -231,6 +256,25 @@ export default function ReportPage() {
             >
               来源
             </button>
+            {canReportRegenerate ? (
+              <button
+                className="sd-btn sd-btn-secondary"
+                data-testid="report-regenerate"
+                disabled={regenerating || Boolean(exporting)}
+                onClick={reportRegenerate}
+              >
+                {regenerating ? "重跑中…" : "重新生成报告"}
+              </button>
+            ) : (
+              <button
+                className="sd-btn sd-btn-secondary"
+                data-testid="report-regenerate"
+                disabled
+                title="需专业版重试"
+              >
+                需专业版重试
+              </button>
+            )}
             <button className="sd-btn sd-btn-secondary" onClick={persistContent}>
               保存正文
             </button>
