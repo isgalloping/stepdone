@@ -328,8 +328,23 @@ export async function runFixture(
           issues: [
             {
               id: "q1",
+              severity: "HIGH",
+              dimension: "accuracy",
+              message: `结论「${target} 的用户规模最大」缺少可靠来源`,
+              status: "OPEN",
+            },
+            {
+              id: "q2",
               severity: "MEDIUM",
+              dimension: "timeliness",
               message: "部分定价信息来源时效性一般",
+              status: "OPEN",
+            },
+            {
+              id: "q3",
+              severity: "LOW",
+              dimension: "expression",
+              message: "个别段落表述可更简洁",
               status: "OPEN",
             },
           ],
