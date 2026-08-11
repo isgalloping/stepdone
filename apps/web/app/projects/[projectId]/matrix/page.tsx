@@ -1,12 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { WorkspaceShell } from "@/components/workspace/workspace-shell";
+import { CitationDrawer } from "@/components/workspace/citation-drawer";
+import { api } from "@/lib/api-client";
 import { useProjectSteps } from "@/hooks/use-project";
 
 export default function MatrixPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const [citationsOpen, setCitationsOpen] = useState(false);
   const steps = useProjectSteps(projectId);
   const matrix = steps.data?.success
     ? steps.data.data.runs.find((r) => r.nodeCode === "BUILD_MATRIX")
@@ -27,6 +32,27 @@ export default function MatrixPage() {
       }>;
     })?.rows ?? []);
 
+  const citations = useQuery({
+    queryKey: ["citations", projectId],
+    queryFn: async () =>
+      api<{
+        citations: Array<{
+          publicId: string;
+          quote: string | null;
+          source: {
+            title: string;
+            publisher: string | null;
+            url: string | null;
+            credibility: string;
+            summary: string | null;
+          };
+        }>;
+      }>(`/api/projects/${projectId}/citations`),
+  });
+
+  const citationList =
+    citations.data?.success ? citations.data.data.citations : [];
+
   const color = (c: string) => {
     if (c === "HIGH") return "#dcfce7";
     if (c === "MEDIUM") return "#fef9c3";
@@ -37,7 +63,24 @@ export default function MatrixPage() {
   return (
     <WorkspaceShell projectId={projectId} mentor={<p>我发现若干值得关注的差异，请到判断页确认最重要的结论。</p>}>
       <div className="sd-card">
-        <h1 style={{ marginTop: 0 }}>竞品对比矩阵</h1>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <h1 style={{ marginTop: 0 }}>竞品对比矩阵</h1>
+          <button
+            className="sd-btn sd-btn-secondary"
+            data-testid="open-citations"
+            onClick={() => setCitationsOpen(true)}
+          >
+            来源
+          </button>
+        </div>
         {!rows.length ? (
           <p className="sd-muted">矩阵生成中…</p>
         ) : (
@@ -86,6 +129,11 @@ export default function MatrixPage() {
           {judgment?.status === "WAITING_USER" ? "去形成判断" : "查看判断页"}
         </Link>
       </div>
+      <CitationDrawer
+        open={citationsOpen}
+        onClose={() => setCitationsOpen(false)}
+        citations={citationList}
+      />
     </WorkspaceShell>
   );
 }

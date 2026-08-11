@@ -6,6 +6,7 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { useQuery } from "@tanstack/react-query";
 import { WorkspaceShell } from "@/components/workspace/workspace-shell";
+import { CitationDrawer } from "@/components/workspace/citation-drawer";
 import { api } from "@/lib/api-client";
 import { useProject } from "@/hooks/use-project";
 
@@ -18,6 +19,7 @@ export default function ReportPage() {
   const [exporting, setExporting] = useState<"PDF" | "PPTX" | null>(null);
   const [exportMsg, setExportMsg] = useState("");
   const [saveMsg, setSaveMsg] = useState("");
+  const [citationsOpen, setCitationsOpen] = useState(false);
 
   useEffect(() => {
     if (project.data?.success) setDraftTitle(project.data.data.title);
@@ -47,10 +49,30 @@ export default function ReportPage() {
       ),
   });
 
+  const citations = useQuery({
+    queryKey: ["citations", projectId],
+    queryFn: async () =>
+      api<{
+        citations: Array<{
+          publicId: string;
+          quote: string | null;
+          source: {
+            title: string;
+            publisher: string | null;
+            url: string | null;
+            credibility: string;
+            summary: string | null;
+          };
+        }>;
+      }>(`/api/projects/${projectId}/citations`),
+  });
+
   const report = artifacts.data?.success
     ? artifacts.data.data.artifacts.find((a) => a.type === "ONLINE_REPORT")
     : undefined;
   const paid = artifacts.data?.success ? artifacts.data.data.paid : false;
+  const citationList =
+    citations.data?.success ? citations.data.data.citations : [];
   const canPpt =
     entitlements.data?.success &&
     entitlements.data.data.entitlements.some(
@@ -202,6 +224,13 @@ export default function ReportPage() {
         >
           <h1 style={{ marginTop: 0 }}>成果编辑</h1>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="sd-btn sd-btn-secondary"
+              data-testid="open-citations"
+              onClick={() => setCitationsOpen(true)}
+            >
+              来源
+            </button>
             <button className="sd-btn sd-btn-secondary" onClick={persistContent}>
               保存正文
             </button>
@@ -258,6 +287,11 @@ export default function ReportPage() {
           <EditorContent editor={editor} />
         </div>
       </div>
+      <CitationDrawer
+        open={citationsOpen}
+        onClose={() => setCitationsOpen(false)}
+        citations={citationList}
+      />
     </WorkspaceShell>
   );
 }

@@ -182,6 +182,13 @@ async function main() {
     return report?.content ? report : null;
   }, "ONLINE_REPORT", 90_000);
   console.log("REPORT_NODE_OK");
+
+  const cites = await api(`/api/projects/${projectId}/citations`, { cookie });
+  if (!cites.json.success || !Array.isArray(cites.json.data?.citations)) {
+    throw new Error("CITATIONS_API_MISSING");
+  }
+  console.log("CITATIONS_OK", cites.json.data.citations.length);
+
   console.log("SMOKE_PASS");
 }
 

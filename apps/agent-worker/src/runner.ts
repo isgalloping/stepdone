@@ -261,7 +261,7 @@ export async function handleAgentJob(job: Job<AgentJob>) {
           }>;
         };
         for (const s of output.sources) {
-          await tx.source.create({
+          const created = await tx.source.create({
             data: {
               publicId: newPublicId(),
               projectId: agentRun.projectId,
@@ -271,6 +271,13 @@ export async function handleAgentJob(job: Job<AgentJob>) {
               credibility: s.credibility,
               summary: s.summary,
               status: "VERIFIED",
+            },
+          });
+          await tx.citation.create({
+            data: {
+              publicId: newPublicId(),
+              sourceId: created.id,
+              quote: s.summary ?? s.title,
             },
           });
         }
@@ -329,6 +336,10 @@ export async function handleAgentJob(job: Job<AgentJob>) {
             content: output,
             createdBy: "AI",
           },
+        });
+        await tx.citation.updateMany({
+          where: { source: { projectId: agentRun.projectId }, artifactId: null },
+          data: { artifactId: artifact.id },
         });
         await tx.project.update({
           where: { id: agentRun.projectId },
