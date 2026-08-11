@@ -50,9 +50,25 @@ test("competitor analysis happy path through export", async ({ page }) => {
   await page.getByTestId("pay-standard").click();
 
   await expect(page).toHaveURL(/\/report/, { timeout: 60_000 });
+
+  await page.getByTestId("open-citations").click();
+  await expect(page.getByTestId("citation-drawer")).toBeVisible();
+  await page.getByRole("button", { name: "关闭" }).click();
+  await expect(page.getByTestId("citation-drawer")).toBeHidden();
+
   await page.getByTestId("export-pdf").click();
+  // Soft-gate dialog appears after POST returns QUALITY_WARNING (async after "正在生成…")
+  const force = page.getByTestId("export-force-confirm");
+  if (
+    await force
+      .waitFor({ state: "visible", timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false)
+  ) {
+    await force.click();
+  }
   await expect(page.getByText(/导出完成|正在生成/)).toBeVisible({
     timeout: 15_000,
   });
-  await expect(page.getByText("导出完成")).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("导出完成")).toBeVisible({ timeout: 45_000 });
 });

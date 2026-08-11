@@ -192,6 +192,15 @@ async function main() {
   }
   console.log("CITATIONS_OK", cites.json.data.citations.length);
 
+  const quality = await api(`/api/projects/${projectId}/quality-check`, { cookie });
+  if (!quality.json.success) {
+    throw new Error(`QUALITY_API_FAIL: ${JSON.stringify(quality.json)}`);
+  }
+  if (!Array.isArray(quality.json.data?.issues)) {
+    throw new Error("QUALITY_ISSUES_MISSING");
+  }
+  console.log("QUALITY_OK", quality.json.data.issues.length);
+
   console.log("SMOKE_PASS");
 }
 
