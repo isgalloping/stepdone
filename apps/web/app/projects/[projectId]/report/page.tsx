@@ -20,6 +20,8 @@ export default function ReportPage() {
     queryFn: async () =>
       api<{
         paid: boolean;
+        canExportPdf: boolean;
+        canExportPptx: boolean;
         artifacts: Array<{
           publicId: string;
           type: string;
@@ -34,6 +36,9 @@ export default function ReportPage() {
     ? artifacts.data.data.artifacts.find((a) => a.type === "ONLINE_REPORT")
     : undefined;
   const paid = artifacts.data?.success ? artifacts.data.data.paid : false;
+  const canExportPptx = artifacts.data?.success
+    ? artifacts.data.data.canExportPptx
+    : false;
 
   useEffect(() => {
     if (artifacts.data?.success && !paid) {
@@ -65,15 +70,64 @@ export default function ReportPage() {
     setSuggest("");
   }
 
-  async function exportPdf() {
+  async function runExport(format: "PDF" | "PPTX") {
     setExporting(true);
-    setExportMsg("正在生成 PDF…");
-    // Thin fake export: serve sample after short wait
-    await new Promise((r) => setTimeout(r, 1200));
-    setExporting(false);
-    setExportMsg("导出完成（演示样例）");
-    window.open("/samples/sample-report.pdf", "_blank");
+    setExportMsg(`正在生成 ${format}…`);
+    try {
+      const created = await api<{ publicId: string }>(
+        `/api/projects/${projectId}/exports`,
+        { method: "POST", body: JSON.stringify({ format }) },
+      );
+      if (!created.success) {
+        setExporting(false);
+        setExportMsg(created.error.message);
+        return;
+      }
+      const exportId = created.data.publicId;
+      // Poll the export status until COMPLETED (real async export pipeline).
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const status = await api<{ status: string; downloadUrl: string | null }>(
+          `/api/exports/${exportId}`,
+        );
+        if (status.success && status.data.status === "COMPLETED") {
+          setExporting(false);
+          setExportMsg("导出完成（演示样例）");
+          if (status.data.downloadUrl) {
+            window.open(status.data.downloadUrl, "_blank");
+          }
+          void exportsQuery.refetch();
+          return;
+        }
+        if (status.success && status.data.status === "FAILED") {
+          setExporting(false);
+          setExportMsg("导出失败，请重试");
+          return;
+        }
+      }
+      setExporting(false);
+      setExportMsg("导出仍在后台进行，可稍后在导出记录中查看");
+    } catch {
+      setExporting(false);
+      setExportMsg("导出失败，请重试");
+    }
   }
+
+  const exportsQuery = useQuery({
+    queryKey: ["exports", projectId],
+    enabled: paid,
+    queryFn: async () =>
+      api<{
+        exports: Array<{
+          publicId: string;
+          format: string;
+          status: string;
+          downloadUrl: string | null;
+          createdAt: string;
+        }>;
+      }>(`/api/projects/${projectId}/exports`),
+  });
 
   return (
     <WorkspaceShell
@@ -110,9 +164,30 @@ export default function ReportPage() {
       <div className="sd-card">
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <h1 style={{ marginTop: 0 }}>成果编辑</h1>
-          <button className="sd-btn" onClick={exportPdf} disabled={exporting} data-testid="export-pdf">
-            {exporting ? "导出中…" : "导出 PDF"}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              className="sd-btn"
+              onClick={() => runExport("PDF")}
+              disabled={exporting}
+              data-testid="export-pdf"
+            >
+              {exporting ? "导出中…" : "导出 PDF"}
+            </button>
+            {canExportPptx ? (
+              <button
+                className="sd-btn sd-btn-secondary"
+                onClick={() => runExport("PPTX")}
+                disabled={exporting}
+                data-testid="export-pptx"
+              >
+                导出 PPT
+              </button>
+            ) : (
+              <span className="sd-chip" title="PPT 导出需专业项目权益">
+                PPT · 专业
+              </span>
+            )}
+          </div>
         </div>
         {exportMsg ? <p className="sd-muted">{exportMsg}</p> : null}
         <div
@@ -127,6 +202,42 @@ export default function ReportPage() {
           <EditorContent editor={editor} />
         </div>
       </div>
+
+      {exportsQuery.data?.success && exportsQuery.data.data.exports.length ? (
+        <div className="sd-card" style={{ marginTop: 12 }}>
+          <h3 style={{ marginTop: 0 }}>导出记录</h3>
+          <div style={{ display: "grid", gap: 8 }}>
+            {exportsQuery.data.data.exports.map((e) => (
+              <div
+                key={e.publicId}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "center",
+                }}
+              >
+                <span>
+                  <span className="sd-chip">{e.format}</span>{" "}
+                  <span className="sd-muted">{e.status}</span>
+                </span>
+                {e.downloadUrl ? (
+                  <a
+                    className="sd-btn sd-btn-secondary"
+                    href={e.downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    下载
+                  </a>
+                ) : (
+                  <span className="sd-muted">处理中…</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </WorkspaceShell>
   );
 }

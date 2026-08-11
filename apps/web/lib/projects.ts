@@ -116,3 +116,19 @@ export async function userHasPaidEntitlement(
   });
   return count > 0;
 }
+
+/**
+ * Capability check for a specific entitlement type on a project (e.g.
+ * REPORT_EXPORT / PPT_EXPORT). Presence — not decrement — gates re-usable
+ * capabilities within a paid project.
+ */
+export async function userHasEntitlement(
+  userId: bigint,
+  projectId: bigint,
+  type: string,
+): Promise<boolean> {
+  const count = await prisma.entitlement.count({
+    where: { userId, projectId, type, remaining: { gt: 0 } },
+  });
+  return count > 0;
+}

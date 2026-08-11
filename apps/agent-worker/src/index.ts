@@ -1,19 +1,24 @@
 import { createQueues, createWorkers } from "./queues";
 import { dispatchOutbox } from "./outbox";
 import { handleAgentJob } from "./runner";
+import { handleExportJob } from "./export-runner";
 import { startHealthServer } from "./health";
 
 async function main() {
   startHealthServer(4101);
   const queues = createQueues();
-  const workers = createWorkers(handleAgentJob);
+  const workers = createWorkers({
+    agent: handleAgentJob,
+    export: handleExportJob,
+  });
 
   for (const w of workers) {
     w.on("failed", (job, err) => {
       console.error("job failed", job?.id, err.message);
     });
     w.on("completed", (job) => {
-      console.log("job completed", job.id, job.data.nodeCode);
+      const data = job.data as { nodeCode?: string; kind?: string };
+      console.log("job completed", job.id, data.nodeCode ?? data.kind ?? "");
     });
   }
 

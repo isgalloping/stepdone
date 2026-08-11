@@ -2,7 +2,7 @@ import { prisma, newPublicId } from "@stepdone/database";
 import { buildIdempotencyKey } from "@stepdone/agent-core";
 import type { NodeCode } from "@stepdone/domain";
 import type { Queue } from "bullmq";
-import type { AgentJob } from "./queues";
+import type { AgentJob, ExportJob } from "./queues";
 
 export async function dispatchOutbox(queues: {
   defaultQueue: Queue;
@@ -28,6 +28,26 @@ export async function dispatchOutbox(queues: {
     try {
       const payload = row.payload as Record<string, unknown>;
       let job: AgentJob | null = null;
+
+      if (payload.type === "EXPORT_ARTIFACT") {
+        const exportJob: ExportJob = {
+          kind: "export",
+          exportPublicId: String(payload.exportPublicId),
+          projectId: String(payload.projectPublicId),
+          format: String(payload.format),
+        };
+        await queues.exportQueue.add(`export:${exportJob.format}`, exportJob, {
+          attempts: 4,
+          backoff: { type: "exponential", delay: 2000 },
+          removeOnComplete: { age: 86400 },
+          removeOnFail: false,
+        });
+        await prisma.outboxEvent.update({
+          where: { id: row.id },
+          data: { status: "PUBLISHED", publishedAt: new Date() },
+        });
+        continue;
+      }
 
       if (payload.type === "START_NODE") {
         const projectPublicId = String(payload.projectPublicId);
