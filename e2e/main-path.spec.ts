@@ -51,5 +51,8 @@ test("competitor analysis happy path through export", async ({ page }) => {
 
   await expect(page).toHaveURL(/\/report/, { timeout: 60_000 });
   await page.getByTestId("export-pdf").click();
-  await expect(page.getByText("导出完成")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/导出完成|正在生成/)).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByText("导出完成")).toBeVisible({ timeout: 30_000 });
 });

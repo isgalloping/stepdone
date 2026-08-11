@@ -345,6 +345,14 @@ export async function runFixture(
             edited: 1,
             sourcesAdded: 0,
           },
+          skills: {
+            目标定义: 82,
+            信息检索: 74,
+            事实核查: 76,
+            比较分析: 88,
+            AI协作: 84,
+            结构化表达: 80,
+          },
           narrative: "你在范围确认与关键判断上保持了主动，建议下次先独立列出候选竞品。",
         },
       };

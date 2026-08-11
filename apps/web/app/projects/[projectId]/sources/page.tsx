@@ -12,6 +12,7 @@ export default function SourcesPage() {
   const steps = useProjectSteps(projectId);
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const sources = useQuery({
     queryKey: ["sources", projectId],
@@ -36,12 +37,22 @@ export default function SourcesPage() {
 
   async function continueNext() {
     setLoading(true);
-    const res = await api(`/api/projects/${projectId}/steps/RESEARCH_SOURCES/decision`, {
-      method: "POST",
-      body: JSON.stringify({ action: "CONTINUE" }),
-    });
-    setLoading(false);
-    if (res.success) router.push(`/projects/${projectId}/dimensions`);
+    setError("");
+    try {
+      const res = await api(`/api/projects/${projectId}/steps/RESEARCH_SOURCES/decision`, {
+        method: "POST",
+        body: JSON.stringify({ action: "CONTINUE" }),
+      });
+      if (res.success) {
+        router.push(`/projects/${projectId}/dimensions`);
+        return;
+      }
+      setError(res.error.message);
+    } catch {
+      setError("网络异常，请重试");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -54,13 +65,30 @@ export default function SourcesPage() {
         <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
           {list.map((s) => (
             <div key={s.publicId} style={{ padding: "0.75rem", background: "var(--sd-bg)", borderRadius: 10 }}>
-              <strong>{s.title}</strong>
+              <strong style={{ textDecoration: s.excluded ? "line-through" : "none" }}>
+                {s.title}
+              </strong>
               <div className="sd-muted">
                 {s.publisher ?? "未知"} · 可信度 {s.credibility}
+                {s.excluded ? " · 已排除" : ""}
               </div>
+              <button
+                className="sd-btn sd-btn-secondary"
+                style={{ minHeight: 32, marginTop: 8 }}
+                onClick={async () => {
+                  await api(`/api/sources/${s.publicId}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({ excluded: !s.excluded }),
+                  });
+                  await sources.refetch();
+                }}
+              >
+                {s.excluded ? "恢复来源" : "排除来源"}
+              </button>
             </div>
           ))}
         </div>
+        {error ? <p style={{ color: "var(--sd-danger)" }}>{error}</p> : null}
         <button
           className="sd-btn"
           style={{ width: "100%", marginTop: 16 }}
@@ -68,7 +96,7 @@ export default function SourcesPage() {
           onClick={continueNext}
           data-testid="continue-sources"
         >
-          继续
+          {loading ? "提交中…" : "继续"}
         </button>
       </div>
     </WorkspaceShell>

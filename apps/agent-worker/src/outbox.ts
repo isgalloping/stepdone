@@ -2,7 +2,7 @@ import { prisma, newPublicId } from "@stepdone/database";
 import { buildIdempotencyKey } from "@stepdone/agent-core";
 import type { NodeCode } from "@stepdone/domain";
 import type { Queue } from "bullmq";
-import type { AgentJob } from "./queues";
+import type { AgentJob, ExportJob } from "./queues";
 
 export async function dispatchOutbox(queues: {
   defaultQueue: Queue;
@@ -27,6 +27,29 @@ export async function dispatchOutbox(queues: {
 
     try {
       const payload = row.payload as Record<string, unknown>;
+
+      if (payload.type === "EXPORT_FILE") {
+        const exportJob: ExportJob = {
+          kind: "export",
+          exportPublicId: String(payload.exportPublicId),
+          artifactPublicId: String(payload.artifactPublicId),
+          projectPublicId: String(payload.projectPublicId),
+          format: payload.format === "PPTX" ? "PPTX" : "PDF",
+          schemaVersion: 1,
+        };
+        await queues.exportQueue.add("EXPORT_FILE", exportJob, {
+          attempts: 4,
+          backoff: { type: "exponential", delay: 2000 },
+          removeOnComplete: { age: 86400 },
+          removeOnFail: false,
+        });
+        await prisma.outboxEvent.update({
+          where: { id: row.id },
+          data: { status: "PUBLISHED", publishedAt: new Date() },
+        });
+        continue;
+      }
+
       let job: AgentJob | null = null;
 
       if (payload.type === "START_NODE") {
@@ -53,13 +76,17 @@ export async function dispatchOutbox(queues: {
           continue;
         }
 
-        if (existing && (existing.status === "QUEUED" || existing.status === "RUNNING")) {
+        if (
+          existing &&
+          (existing.status === "QUEUED" || existing.status === "RUNNING")
+        ) {
           const step = existing.stepRunId
             ? await prisma.projectStepRun.findUnique({
                 where: { id: existing.stepRunId },
               })
             : null;
           job = {
+            kind: "agent",
             agentRunId: existing.publicId,
             projectId: project.publicId,
             stepRunId: step?.publicId ?? newPublicId(),
@@ -93,6 +120,7 @@ export async function dispatchOutbox(queues: {
           });
 
           job = {
+            kind: "agent",
             agentRunId: agentRun.publicId,
             projectId: project.publicId,
             stepRunId: stepRun.publicId,
@@ -102,6 +130,7 @@ export async function dispatchOutbox(queues: {
         }
       } else if (payload.agentRunId) {
         job = {
+          kind: "agent",
           agentRunId: String(payload.agentRunId),
           projectId: String(payload.projectId),
           stepRunId: String(payload.stepRunId),

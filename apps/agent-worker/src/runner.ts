@@ -4,8 +4,9 @@ import { acquireLease, heartbeatLease } from "@stepdone/agent-core";
 import type { NodeCode } from "@stepdone/domain";
 import IORedis from "ioredis";
 import { runFixture } from "./fixtures/index";
-import type { AgentJob } from "./queues";
+import type { AgentJob, WorkerJob } from "./queues";
 import { buildIdempotencyKey } from "@stepdone/agent-core";
+import { handleExportJob } from "./export-runner";
 
 const workerId = `worker_${process.pid}`;
 const redis = new IORedis(process.env.REDIS_URL ?? "redis://127.0.0.1:6379", {
@@ -59,6 +60,14 @@ async function enqueueFollowUp(
   });
 }
 
+export async function handleWorkerJob(job: Job<WorkerJob>) {
+  if (job.data.kind === "export" || "exportPublicId" in job.data) {
+    await handleExportJob(job as Job<import("./queues").ExportJob>);
+    return;
+  }
+  await handleAgentJob(job as Job<AgentJob>);
+}
+
 export async function handleAgentJob(job: Job<AgentJob>) {
   const data = job.data;
   const agentRun = await prisma.agentRun.findUnique({
@@ -66,7 +75,14 @@ export async function handleAgentJob(job: Job<AgentJob>) {
     include: { project: true, stepRun: true },
   });
   if (!agentRun) return;
-  if (agentRun.status === "SUCCEEDED" || agentRun.status === "CANCELLED") return;
+  if (
+    agentRun.status === "SUCCEEDED" ||
+    agentRun.status === "CANCELLED" ||
+    agentRun.status === "FAILED_RETRYABLE" ||
+    agentRun.status === "FAILED_FINAL"
+  ) {
+    return;
+  }
 
   const ok = await acquireLease(prisma, agentRun.id, workerId);
   if (!ok) {
@@ -148,13 +164,52 @@ export async function handleAgentJob(job: Job<AgentJob>) {
     }
 
     if (result.type !== "completed") {
-      await prisma.agentRun.update({
-        where: { id: agentRun.id },
-        data: {
-          status: "FAILED_RETRYABLE",
-          errorMessage: result.type === "failed" ? result.message : result.reason,
-          lockedBy: null,
-        },
+      const message =
+        result.type === "failed" ? result.message : result.reason;
+      await prisma.$transaction(async (tx) => {
+        await tx.agentRun.update({
+          where: { id: agentRun.id },
+          data: {
+            status: "FAILED_RETRYABLE",
+            errorMessage: message,
+            lockedBy: null,
+            lockExpiresAt: null,
+          },
+        });
+        if (agentRun.stepRunId) {
+          await tx.projectStepRun.update({
+            where: { id: agentRun.stepRunId },
+            data: {
+              status: "FAILED_RETRYABLE",
+              output: { error: message },
+            },
+          });
+        }
+        await tx.project.update({
+          where: { id: agentRun.projectId },
+          data: {
+            status: "FAILED",
+            currentStepCode: data.nodeCode,
+          },
+        });
+        const event = await tx.projectEvent.create({
+          data: {
+            publicId: newPublicId(),
+            projectId: agentRun.projectId,
+            agentRunId: agentRun.id,
+            type: "FAILED",
+            stage: data.nodeCode,
+            message: `步骤失败，可重试：${message}`,
+            percent: 0,
+          },
+        });
+        await publish(agentRun.project.publicId, {
+          id: event.publicId,
+          type: event.type,
+          stage: event.stage,
+          message: event.message,
+          percent: event.percent,
+        });
       });
       return;
     }
@@ -343,6 +398,55 @@ export async function handleAgentJob(job: Job<AgentJob>) {
         "ABILITY_REPORT",
       );
     }
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "未知错误";
+    await prisma.$transaction(async (tx) => {
+      await tx.agentRun.update({
+        where: { id: agentRun.id },
+        data: {
+          status: "FAILED_RETRYABLE",
+          errorMessage: message,
+          lockedBy: null,
+          lockExpiresAt: null,
+        },
+      });
+      if (agentRun.stepRunId) {
+        await tx.projectStepRun.update({
+          where: { id: agentRun.stepRunId },
+          data: {
+            status: "FAILED_RETRYABLE",
+            output: { error: message },
+          },
+        });
+      }
+      await tx.project.update({
+        where: { id: agentRun.projectId },
+        data: {
+          status: "FAILED",
+          currentStepCode: data.nodeCode,
+        },
+      });
+      const event = await tx.projectEvent.create({
+        data: {
+          publicId: newPublicId(),
+          projectId: agentRun.projectId,
+          agentRunId: agentRun.id,
+          type: "FAILED",
+          stage: data.nodeCode,
+          message: `步骤异常，可重试：${message}`,
+          percent: 0,
+        },
+      });
+      await publish(agentRun.project.publicId, {
+        id: event.publicId,
+        type: event.type,
+        stage: event.stage,
+        message: event.message,
+        percent: event.percent,
+      });
+    });
+    console.error("agent job failed", data.agentRunId, message);
   } finally {
     clearInterval(hb);
   }

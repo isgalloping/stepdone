@@ -12,6 +12,16 @@ type Issue = {
   status: "OPEN" | "RESOLVED";
 };
 
+const SCORE_LABELS: Record<string, string> = {
+  accuracy: "准确性",
+  completeness: "完整性",
+  logic: "逻辑性",
+  timeliness: "时效性",
+  usability: "可用性",
+  expression: "表达",
+  risk: "风险控制",
+};
+
 export default function QualityPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const steps = useProjectSteps(projectId);
@@ -36,14 +46,41 @@ export default function QualityPage() {
   };
 
   return (
-    <WorkspaceShell projectId={projectId} mentor={<p>处理高风险问题后再交付。仍可强制导出，但会提示风险。</p>}>
+    <WorkspaceShell
+      projectId={projectId}
+      mentor={<p>处理高风险问题后再交付。仍可强制导出，但会提示风险。</p>}
+    >
       <div className="sd-card">
         <h1 style={{ marginTop: 0 }}>质量检查</h1>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 12 }}>
+        {!run || run.status === "QUEUED" || run.status === "RUNNING" ? (
+          <p className="sd-muted">质量检查生成中…</p>
+        ) : null}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+            gap: 12,
+          }}
+        >
           {Object.entries(scores).map(([k, v]) => (
             <div key={k} className="sd-card" style={{ textAlign: "center" }}>
-              <div style={{ fontSize: 28, fontWeight: 700, color: "var(--sd-primary)" }}>{v}</div>
-              <div className="sd-muted">{k}</div>
+              <div
+                style={{
+                  width: 72,
+                  height: 72,
+                  margin: "0 auto 8px",
+                  borderRadius: "50%",
+                  border: "6px solid var(--sd-primary)",
+                  display: "grid",
+                  placeItems: "center",
+                  fontSize: 22,
+                  fontWeight: 700,
+                  color: "var(--sd-primary)",
+                }}
+              >
+                {v}
+              </div>
+              <div className="sd-muted">{SCORE_LABELS[k] ?? k}</div>
             </div>
           ))}
         </div>
@@ -64,11 +101,13 @@ export default function QualityPage() {
                   )
                 }
               >
-                {issue.status === "RESOLVED" ? "已处理" : "修改表述"}
+                {issue.status === "RESOLVED" ? "已处理" : "标记为已修改"}
               </button>
             </div>
           ))}
-          {!issues.length ? <p className="sd-muted">质量报告生成中或暂无问题。</p> : null}
+          {!issues.length ? (
+            <p className="sd-muted">质量报告生成中或暂无问题。</p>
+          ) : null}
         </div>
       </div>
     </WorkspaceShell>

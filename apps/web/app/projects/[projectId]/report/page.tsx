@@ -7,13 +7,21 @@ import StarterKit from "@tiptap/starter-kit";
 import { useQuery } from "@tanstack/react-query";
 import { WorkspaceShell } from "@/components/workspace/workspace-shell";
 import { api } from "@/lib/api-client";
+import { useProject } from "@/hooks/use-project";
 
 export default function ReportPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
+  const project = useProject(projectId);
   const [suggest, setSuggest] = useState("");
-  const [exporting, setExporting] = useState(false);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [exporting, setExporting] = useState<"PDF" | "PPTX" | null>(null);
   const [exportMsg, setExportMsg] = useState("");
+  const [saveMsg, setSaveMsg] = useState("");
+
+  useEffect(() => {
+    if (project.data?.success) setDraftTitle(project.data.data.title);
+  }, [project.data]);
 
   const artifacts = useQuery({
     queryKey: ["artifacts", projectId],
@@ -23,17 +31,31 @@ export default function ReportPage() {
         artifacts: Array<{
           publicId: string;
           type: string;
-          content: { blocks?: Array<{ type: string; text?: string; level?: number }> } | null;
-          previewOnly?: boolean;
+          content: {
+            blocks?: Array<{ type: string; text?: string; level?: number }>;
+          } | null;
         }>;
       }>(`/api/projects/${projectId}/artifacts`),
     refetchInterval: 3000,
+  });
+
+  const entitlements = useQuery({
+    queryKey: ["entitlements"],
+    queryFn: async () =>
+      api<{ entitlements: Array<{ type: string; remaining: number }> }>(
+        "/api/entitlements",
+      ),
   });
 
   const report = artifacts.data?.success
     ? artifacts.data.data.artifacts.find((a) => a.type === "ONLINE_REPORT")
     : undefined;
   const paid = artifacts.data?.success ? artifacts.data.data.paid : false;
+  const canPpt =
+    entitlements.data?.success &&
+    entitlements.data.data.entitlements.some(
+      (e) => e.type === "PPT_EXPORT" && e.remaining > 0,
+    );
 
   useEffect(() => {
     if (artifacts.data?.success && !paid) {
@@ -55,7 +77,9 @@ export default function ReportPage() {
 
   useEffect(() => {
     if (editor && report?.content?.blocks?.length) {
-      editor.commands.setContent(`<p>${initialText.replace(/\n\n/g, "</p><p>")}</p>`);
+      editor.commands.setContent(
+        `<p>${initialText.replace(/\n\n/g, "</p><p>")}</p>`,
+      );
     }
   }, [editor, initialText, report?.content?.blocks?.length]);
 
@@ -65,33 +89,93 @@ export default function ReportPage() {
     setSuggest("");
   }
 
-  async function exportPdf() {
-    setExporting(true);
-    setExportMsg("正在生成 PDF…");
-    // Thin fake export: serve sample after short wait
-    await new Promise((r) => setTimeout(r, 1200));
-    setExporting(false);
-    setExportMsg("导出完成（演示样例）");
-    window.open("/samples/sample-report.pdf", "_blank");
+  async function persistContent() {
+    if (!report || !editor) return;
+    const text = editor.getText();
+    setSaveMsg("正在保存正文…");
+    const res = await api(`/api/artifacts/${report.publicId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        content: {
+          type: "document",
+          blocks: text
+            .split(/\n+/)
+            .filter(Boolean)
+            .map((t, i) => ({
+              id: `b_${i + 1}`,
+              type: "paragraph",
+              text: t,
+            })),
+        },
+      }),
+    });
+    setSaveMsg(res.success ? "正文已保存" : res.error.message);
+  }
+
+  async function exportFile(format: "PDF" | "PPTX") {
+    if (!report) return;
+    setExporting(format);
+    setExportMsg(`正在生成 ${format}…`);
+    const created = await api<{ exportPublicId: string }>(
+      `/api/artifacts/${report.publicId}/exports`,
+      {
+        method: "POST",
+        body: JSON.stringify({ format }),
+      },
+    );
+    if (!created.success) {
+      setExporting(null);
+      setExportMsg(created.error.message);
+      return;
+    }
+
+    const exportId = created.data.exportPublicId;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 800));
+      const st = await api<{
+        status: string;
+        downloadUrl: string | null;
+      }>(`/api/exports/${exportId}`);
+      if (!st.success) continue;
+      if (st.data.status === "COMPLETED" && st.data.downloadUrl) {
+        setExporting(null);
+        setExportMsg("导出完成");
+        window.open(st.data.downloadUrl, "_blank");
+        return;
+      }
+      if (st.data.status === "FAILED") {
+        setExporting(null);
+        setExportMsg("导出失败，请重试");
+        return;
+      }
+    }
+    setExporting(null);
+    setExportMsg("导出超时，请稍后重试");
   }
 
   return (
     <WorkspaceShell
       projectId={projectId}
+      draftTitle={draftTitle}
+      onRemoteTitle={(title) => setDraftTitle(title)}
       mentor={
         <div>
           <p>选中内容后可让 AI 给出建议，采用后才写入正文。</p>
           <button
             className="sd-btn sd-btn-secondary"
             style={{ width: "100%", marginBottom: 8 }}
-            onClick={() => setSuggest("建议改写：将结论表述得更克制，并补充来源限定语。")}
+            onClick={() =>
+              setSuggest("建议改写：将结论表述得更克制，并补充来源限定语。")
+            }
           >
             改写选中内容
           </button>
           <button
             className="sd-btn sd-btn-secondary"
             style={{ width: "100%", marginBottom: 8 }}
-            onClick={() => setSuggest("建议缩短：保留核心差异与一条行动建议。")}
+            onClick={() =>
+              setSuggest("建议缩短：保留核心差异与一条行动建议。")
+            }
           >
             缩短
           </button>
@@ -108,13 +192,60 @@ export default function ReportPage() {
       }
     >
       <div className="sd-card">
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
           <h1 style={{ marginTop: 0 }}>成果编辑</h1>
-          <button className="sd-btn" onClick={exportPdf} disabled={exporting} data-testid="export-pdf">
-            {exporting ? "导出中…" : "导出 PDF"}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="sd-btn sd-btn-secondary" onClick={persistContent}>
+              保存正文
+            </button>
+            <button
+              className="sd-btn"
+              onClick={() => exportFile("PDF")}
+              disabled={Boolean(exporting) || !report}
+              data-testid="export-pdf"
+            >
+              {exporting === "PDF" ? "导出中…" : "导出 PDF"}
+            </button>
+            {canPpt ? (
+              <button
+                className="sd-btn sd-btn-secondary"
+                onClick={() => exportFile("PPTX")}
+                disabled={Boolean(exporting) || !report}
+                data-testid="export-ppt"
+              >
+                {exporting === "PPTX" ? "导出中…" : "导出 PPT"}
+              </button>
+            ) : (
+              <button
+                className="sd-btn sd-btn-secondary"
+                disabled
+                title="专业项目权益可导出 PPT"
+                data-testid="export-ppt-locked"
+              >
+                导出 PPT（需专业版）
+              </button>
+            )}
+          </div>
         </div>
+
+        <label className="sd-label">项目名称</label>
+        <input
+          className="sd-input"
+          value={draftTitle}
+          onChange={(e) => setDraftTitle(e.target.value)}
+          style={{ marginBottom: 12 }}
+        />
+
         {exportMsg ? <p className="sd-muted">{exportMsg}</p> : null}
+        {saveMsg ? <p className="sd-muted">{saveMsg}</p> : null}
+
         <div
           style={{
             border: "1px solid var(--sd-border)",
