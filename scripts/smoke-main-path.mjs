@@ -187,6 +187,9 @@ async function main() {
   if (!cites.json.success || !Array.isArray(cites.json.data?.citations)) {
     throw new Error("CITATIONS_API_MISSING");
   }
+  if (cites.json.data.citations.length < 1) {
+    throw new Error("CITATIONS_EMPTY");
+  }
   console.log("CITATIONS_OK", cites.json.data.citations.length);
 
   console.log("SMOKE_PASS");
