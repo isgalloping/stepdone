@@ -4,11 +4,16 @@ import { jsonOk, jsonErr } from "@/lib/api";
 import { requireUser } from "@/lib/session";
 import { createProjectFromObjective } from "@/lib/projects";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const user = await requireUser();
+    const view = new URL(request.url).searchParams.get("view");
+    const deleted = view === "deleted";
     const projects = await prisma.project.findMany({
-      where: { userId: user.id },
+      where: {
+        userId: user.id,
+        deletedAt: deleted ? { not: null } : null,
+      },
       orderBy: { updatedAt: "desc" },
       take: 50,
     });
@@ -20,6 +25,8 @@ export async function GET() {
         currentStepCode: p.currentStepCode,
         progress: p.progress,
         revision: p.revision,
+        archivedAt: p.archivedAt?.toISOString() ?? null,
+        deletedAt: p.deletedAt?.toISOString() ?? null,
         updatedAt: p.updatedAt.toISOString(),
       })),
     });

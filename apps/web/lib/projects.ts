@@ -116,3 +116,15 @@ export async function userHasPaidEntitlement(
   });
   return count > 0;
 }
+
+/** Presence check for a project entitlement type (e.g. REPORT_EXPORT / PPT_EXPORT). */
+export async function userHasEntitlement(
+  userId: bigint,
+  projectId: bigint,
+  type: string,
+): Promise<boolean> {
+  const count = await prisma.entitlement.count({
+    where: { userId, projectId, type, remaining: { gt: 0 } },
+  });
+  return count > 0;
+}

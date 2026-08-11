@@ -396,21 +396,25 @@ export async function handleAgentJob(job: Job<AgentJob>) {
           },
         });
       } else if (data.nodeCode === "QUALITY_REVIEW") {
-        const output = result.output as { issues?: unknown[]; scores?: unknown };
+        const output = result.output as {
+          issues?: Array<Record<string, unknown>>;
+          scores?: Record<string, number>;
+        };
         const prev = (agentRun.project.metadata ?? {}) as Record<string, unknown>;
+        const qualityMeta = {
+          ...prev,
+          qualityCheck: {
+            scores: output.scores ?? {},
+            issues: output.issues ?? [],
+          },
+        };
         await tx.project.update({
           where: { id: agentRun.projectId },
           data: {
             status: "ACTIVE",
             currentStepCode: "QUALITY_REVIEW",
             progress: 95,
-            metadata: {
-              ...prev,
-              qualityCheck: {
-                scores: output.scores ?? {},
-                issues: output.issues ?? [],
-              },
-            },
+            metadata: JSON.parse(JSON.stringify(qualityMeta)),
           },
         });
       } else if (data.nodeCode === "BUILD_MATRIX") {

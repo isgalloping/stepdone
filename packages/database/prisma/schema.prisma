@@ -113,6 +113,8 @@ model Project {
   metadata          Json?     @map("metadata_json")
   startedAt         DateTime? @map("started_at") @db.DateTime(3)
   completedAt       DateTime? @map("completed_at") @db.DateTime(3)
+  archivedAt        DateTime? @map("archived_at") @db.DateTime(3)
+  deletedAt         DateTime? @map("deleted_at") @db.DateTime(3)
   createdAt         DateTime  @default(now()) @map("created_at") @db.DateTime(3)
   updatedAt         DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
 
